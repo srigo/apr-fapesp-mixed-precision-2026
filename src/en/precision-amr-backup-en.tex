@@ -1,0 +1,462 @@
+% !TEX program = xelatex
+\documentclass[12pt,a4paper]{article}
+
+\usepackage{fontspec}
+\setmainfont{Arial} % FAPESP APR: Calibri or Arial font, size 12
+\usepackage[english]{babel}
+\usepackage{microtype}
+\usepackage[a4paper,left=3cm,right=1.5cm,top=2.5cm,bottom=2.5cm]{geometry} % FAPESP APR: 3cm left / 1.5cm right margins
+\usepackage{setspace}
+\onehalfspacing % FAPESP APR: 1.5 line spacing
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks,breaklinks]{hyperref}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.75em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.75em}{}
+
+\newcommand{\pamr}{P\nobreakdash-AMR}
+
+\title{\textbf{Precision-AMR: Spatially Adaptive Floating-Point Precision
+for PDE-Based Reverse Time Migration}\\[0.5em]
+\large\normalfont\itshape A new axis of numerical adaptivity for adjoint
+wave-equation solvers, developed on dedicated NVIDIA hardware and validated
+across heterogeneous NVIDIA and AMD GPU architectures on the Santos Dumont
+supercomputer (LNCC)}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{flushleft}
+\textbf{Principal Investigator:} Prof.\ Sandro Rigo\\
+\textbf{Title/Role:} Associate Professor, Institute of Computing\\
+\textbf{University:} Universidade Estadual de Campinas (UNICAMP)\\[0.4em]
+\textbf{Collaborator 1:} Thiago Maltempi --- Graduate Researcher (PhD
+Candidate), Institute of Computing, Universidade Estadual de Campinas\\
+\textbf{Collaborator 2:} Prof.\ Herv\'e Yviquel --- Assistant Professor,
+Institute of Computing, Universidade Estadual de Campinas
+\end{flushleft}
+
+\section*{Abstract}
+
+Scientific simulations such as Reverse Time Migration (RTM) solve partial
+differential equations (PDEs) demanding FP64/FP32 accuracy, yet modern GPU
+architectures increasingly optimize for low-precision AI workloads (FP8/BF16)
+and expose new memory hierarchies, tensor cores, and mixed-precision math
+libraries. Prior work on RTM acceleration has reduced floating-point precision
+uniformly across the whole computational domain; separately, adaptive mesh
+refinement (AMR) has been explored for seismic wave modeling to vary grid
+spacing according to local wavelength. This project proposes a third, largely
+unexplored axis of adaptivity: Precision-AMR (\pamr{}), a spatially
+block-structured scheme that varies floating-point precision --- not mesh
+resolution --- according to physically motivated, per-block error-tolerance
+criteria (proximity to absorbing boundaries, wavefield energy density,
+adjoint-sensitivity magnitude, and a time-dependent band trailing the
+propagating wavefront).
+
+Unlike mesh-based AMR, where numerical artifacts are localized at coarse-fine
+grid interfaces, precision-induced round-off noise propagates with the wave
+itself, so \pamr{}'s tagging criteria must target where injected error will not
+reach the imaging condition or the FWI gradient, and must control round-off
+accumulation over the thousands of time steps typical of RTM/FWI. We build
+\pamr{} on our prior GPUZIP framework, which accelerated RTM on V100 systems
+via GPU-side lossy compression (nvCOMP/Bitcomp) and checkpoint prefetching,
+cutting host--GPU transfer volume by up to 80$\times$ and delivering up to
+5.1$\times$ end-to-end speedup. Differential checkpointing, cuBLAS/cuSOLVER
+mixed-precision linear algebra, Ozaki-scheme FP64 emulation, and cuFFT-based
+spectral operators are retained as supporting techniques, now applied
+selectively, per tile, according to the criteria that \pamr{} establishes,
+rather than uniformly across the domain.
+
+The 12-month programme combines two computational resources. An RTX PRO 6000
+Blackwell GPU, requested as dedicated local hardware, supports day-to-day
+development and the selective-emulation study central to Phase 3, since its
+negligible native FP64 throughput makes the precision-zoning question
+unavoidable rather than optional. The Santos Dumont supercomputer
+(LNCC/SINAPAD) --- whose partitions span NVIDIA Volta V100, Hopper H100, and
+Grace-Hopper GH200 accelerators alongside AMD Instinct MI300A (CDNA3) APUs ---
+supports the large-scale validation sweep across datasets, checkpointing
+algorithms, and \pamr{} tagging criteria, and lets us test directly whether the
+tagging methodology generalizes beyond a single GPU vendor. Outcomes include an
+open-source GPUZIP v3.0 release built around a Precision-AMR module, and a
+peer-reviewed publication.
+
+\paragraph{Keywords:} reverse time migration; adaptive precision;
+mixed-precision computing; floating-point arithmetic; adjoint PDE solvers;
+block-structured adaptivity; cross-architecture portability; GPU computing;
+lossy compression; checkpointing.
+
+\section{Computational Platforms}
+
+\paragraph{HPC SDK} (nvc++/nvfortran, CUDA-X math libraries, Nsight
+Systems/Compute). Experience: team uses CUDA and Nsight Systems routinely.
+Adoption: migrate the Awave-3D build from clang to nvc++ and validate numerical
+parity against existing baselines. Nsight Compute provides kernel-level roofline
+analysis, now applied per spatial tile, to identify which tiles are
+memory-bandwidth-bound versus compute-bound and to objectively scope where a
+lower-precision tile actually pays off.
+
+\paragraph{RTX PRO 6000 Blackwell} (dedicated hardware, requested). This GPU's
+5th-generation tensor cores with FP8/FP4 support and negligible native FP64
+throughput make it the central platform for \pamr{}: because full-domain FP64
+emulation would be expensive everywhere, the scientific question this project
+answers is precisely which tiles need it and which do not. Its 96\,GB GDDR7 ECC
+memory also supports local development; as dedicated, queue-free hardware it
+enables fast iterative debugging that a shared batch system is not well suited
+for.
+
+\paragraph{Santos Dumont} (LNCC/SINAPAD, Tier-0 national supercomputer,
+Petr\'opolis-RJ). Provides the large-scale validation environment. Its
+BullSequana X1000 partition includes 94 nodes with 4$\times$ NVIDIA Volta V100
+GPUs each --- matching the hardware used for the original GPUZIP baselines ---
+plus a dedicated AI node with 8$\times$ V100 16GB over NVLink. Its newer
+BullSequana XH3000 partition adds 62 nodes with 4$\times$ NVIDIA Hopper H100 SXM
+80GB over NVLink, 36 NVIDIA Grace-Hopper GH200 superchip nodes, and 18 nodes
+with 2$\times$ AMD Instinct MI300A APUs (CDNA3 GPU cores, 128\,GB HBM3 each).
+This heterogeneity lets us generate FP64 ground truth and run the full \pamr{}
+criteria sweep at scale on NVIDIA hardware, and separately test whether the
+tagging methodology and block-tiling approach generalize to a non-NVIDIA
+architecture.
+
+\paragraph{nvCOMP / Bitcomp} (GPU-side lossy compressor). Experience: integrated
+and validated in GPUZIP v2.0, where Bitcomp delivered the best
+accuracy-compression balance on V100. Adoption here: the storage mechanism for
+differential checkpointing, now indexed by the same tile identifiers used for
+precision tagging, so each tile carries a single, jointly-tuned
+precision-and-compression error budget.
+
+\paragraph{cuBLAS (mixed-precision extensions) and cuSOLVER (iterative
+refinement).} Both ship inside the HPC SDK. Experience: team has used
+BLAS/LAPACK routines in prior HPC work. Adoption: applied only within tiles that
+\pamr{} flags as containing dense sub-kernels needing accuracy beyond native low
+precision (FP32 compute with FP64 accumulation, and cuSOLVER iterative
+refinement).
+
+\paragraph{Ozaki-scheme FP64 emulation} via low-precision tensor cores.
+Adoption: reserved for the subset of tiles that \pamr{}'s sensitivity criteria
+mark as accuracy-critical (near the wavefront, high adjoint-sensitivity
+magnitude), rather than applied uniformly --- directly testing whether selective
+emulation is cheaper than emulating everywhere while preserving image fidelity.
+Recent work has demonstrated up to 2.3$\times$ speedup over native FP64 DGEMM on
+the RTX PRO 6000 Blackwell~\cite{uchino2025ozaki}.
+
+\paragraph{cuFFT.} Experience: used in prior spectral operator work. Adoption:
+benchmarked as an alternative to FDM stencils for wavefield updates within
+selected, precision-tagged tiles, characterising the memory-bandwidth versus
+compute trade-off relative to the standard finite-difference path.
+
+\paragraph{AMD Instinct MI300A} (CDNA3, Santos Dumont, exploratory). As an
+additional validation activity, we assess how much of the \pamr{} framework ---
+the block/tile decomposition, the four tagging criteria, and the joint
+precision-compression error budget --- transfers to AMD's ROCm/HIP ecosystem
+(rocBLAS, hipBLAS, and AMD's own reduced-precision matrix paths), without
+assuming feature parity with the CUDA-specific Ozaki-scheme emulation or
+nvCOMP/Bitcomp compression path. The goal is to determine whether Precision-AMR
+is a portable methodology or an NVIDIA-specific optimization.
+
+\section{Dataset and Model}
+
+\begin{itemize}
+  \item Size: $\approx$X\,TB total (to be confirmed from REDU). Checkpoint pools
+        reached $\approx$330\,GB host RAM on V100; a single Marmousi3D checkpoint
+        is $\approx$500\,MB.
+  \item Data type: seismic velocity models and traces (numerical grids).
+  \item Source: Salt (SEG/EAGE) and Marmousi3D are open datasets; the Large
+        dataset is in-house.
+  \item Confidentiality: non-confidential, no personal data, no NDA.
+  \item AI model parameters: not applicable (numerical PDE solver).
+  \item Storage location: Universidade Estadual de Campinas (UNICAMP), Campinas,
+        Brazil; staged for upload to Santos Dumont's parallel file systems for
+        large-scale runs.
+\end{itemize}
+
+\section{Introduction}
+
+Hardware is trending toward low precision for AI, but PDE-based scientific
+simulation requires high precision to remain trustworthy. RTM, a seismic imaging
+method that solves the wave equation by finite differences over thousands of
+time steps, is a canonical example: geophysicists use the migrated image to
+guide expensive drilling decisions, so numerical fidelity is non-negotiable. RTM
+is also memory-intensive, requiring hundreds of gigabytes of wavefield state and
+relying on checkpointing to trade memory against recomputation in its
+forward/backward adjoint structure.
+
+Our prior work addressed the dominant bottleneck --- host--GPU checkpoint
+transfer over PCIe --- with GPUZIP~\cite{maltempi2025checkpointing,gpuzip}, which
+compresses checkpoints on the GPU and prefetches them proactively, reaching up to
+5.1$\times$ speedup on V100 while preserving image quality (SSIM $\approx$ 1,
+near-zero relative error). Separately, reduced-precision arithmetic has already
+been shown to be viable for seismic modeling, RTM, and FWI:
+Fabien-Ouellet~\cite{fabienouellet2020half} found that a stable half-precision
+(FP16) implementation of the elastic wave equation is achievable through
+appropriate scaling, that the resulting seismogram error is a negligible fraction
+of total seismic energy and largely incoherent with seismic phases, and that this
+noise does not adversely affect FWI or RTM image quality. However, that reduction
+is applied uniformly across the entire domain. Gao and
+Harms~\cite{gao2023half} identified a specific hazard of that approach: naive
+half-precision time stepping accumulates round-off error through a disguised
+recursive summation in the update rule, degrading solution quality, with
+compensated (Kahan) summation as an effective remedy.
+
+At the same time, adaptive mesh refinement (AMR) has been explored for seismic
+wave simulation and, more recently, explicitly for FWI and RTM workflows, to
+avoid the waste inherent in a uniform grid: dispersion and dissipation errors
+require grid spacing proportional to the shortest wavelength, so a uniform mesh
+is forced to use the finest spacing everywhere, even where the local velocity
+field would tolerate a much coarser one. AMR addresses this by refining
+$\Delta x$ locally. No comparable, physically-motivated scheme exists for
+floating-point precision: existing mixed-precision work in seismic imaging is
+either global and uniform (as above), or adaptive only at the level of an
+individual linear-algebra operation (mixed-precision GEMM, iterative refinement,
+Ozaki-scheme emulation), not tied to a spatial decomposition of the wavefield
+itself.
+
+This project proposes to close that gap with Precision-AMR (\pamr{}): an
+adaptive-precision analogue of AMR that keeps mesh resolution fixed and instead
+varies the floating-point format assigned to each block (tile) of the domain,
+based on criteria that predict whether the round-off error introduced in that
+tile can reach the imaging condition or the FWI gradient. This is a structurally
+different problem from mesh-based AMR. In AMR, the characteristic artifact is a
+localized reflection at the coarse-fine grid interface, because refinement
+changes the discretization itself. In \pamr{}, no discretization boundary is
+introduced; instead, a spatially varying level of round-off noise is injected
+into a hyperbolic PDE, and that noise propagates together with the wave. Tagging
+criteria therefore cannot rely solely on local smoothness (as AMR refinement
+indicators do); they must instead approximate where an error, once injected, will
+decay, be absorbed, or otherwise fail to reach the receivers or the sensitivity
+kernel before the simulation ends.
+
+We propose four candidate criteria, detailed in Methods: proximity to the
+absorbing boundary (PML), where energy is already being discarded on purpose;
+local wavefield energy density, which governs how much a given tile's error can
+contribute to the final correlation; adjoint-sensitivity magnitude, reusing the
+gradient computation that FWI already performs; and a time-dependent band
+trailing the propagating wavefront, analogous to a moving shock detector in
+astrophysical or combustion AMR codes. Because RTM/FWI already require a
+block/tile decomposition of the domain for checkpointing, \pamr{} reuses that
+same decomposition as its tagging granularity, unifying the precision budget and
+the lossy-compression budget of differential checkpointing into a single, jointly
+tuned per-tile accuracy target. Mixed-precision GEMM, cuSOLVER iterative
+refinement, and Ozaki-scheme emulation remain essential, but are now applied
+selectively, only where \pamr{}'s criteria say they are needed, which is the
+natural way to exploit GPUs such as the RTX PRO 6000 Blackwell that offer
+negligible native FP64 throughput.
+
+Because the tagging criteria are motivated by the physics of wave propagation and
+adjoint sensitivity rather than by any particular vendor's arithmetic units, we
+treat their portability as an explicit question rather than an assumption. Access
+to the Santos Dumont supercomputer --- whose partitions include AMD Instinct
+MI300A accelerators alongside several NVIDIA generations --- lets us test that
+question directly, rather than merely claim it.
+
+\section{Methods}
+
+\subsection{Phase 1 --- Infrastructure and Baseline (M1--M2)}
+
+Port Awave-3D and GPUZIP to the HPC SDK (nvc++), re-integrate nvCOMP/Bitcomp, and
+reproduce V100 baselines on Santos Dumont's V100 partition, matching the original
+GPUZIP hardware.
+
+\begin{itemize}
+  \item Establish a block/tile decomposition of the domain, extending the
+        existing checkpoint-block structure so that it can also carry a per-tile
+        precision tag.
+  \item Profile every kernel with Nsight Systems and Nsight Compute, on both the
+        RTX PRO 6000 and Santos Dumont, confirming that FDM stencils are
+        memory-bandwidth-bound at the tile granularity before any precision
+        changes are attempted.
+\end{itemize}
+
+\subsection{Phase 2 --- Precision-AMR: Criteria, Tagging, and Validation (M2--M6)}
+
+This is the core scientific phase, run at scale on Santos Dumont's H100
+partition. We design, implement, and validate four candidate tagging criteria for
+spatial precision zoning:
+
+\begin{itemize}
+  \item \textbf{Boundary criterion:} tiles inside or adjacent to the
+        PML/absorbing layer are tagged for reduced precision by default, since
+        their contribution is already being damped.
+  \item \textbf{Energy criterion:} tiles are tagged by a threshold on local
+        wavefield energy density, so that regions of low amplitude (before
+        wavefront arrival, or after geometrical spreading has attenuated the
+        signal) tolerate lower precision.
+  \item \textbf{Sensitivity criterion (FWI):} tiles are tagged using the
+        magnitude of the local adjoint-sensitivity kernel, reusing the gradient
+        computation itself as the tagging signal, in direct analogy to a
+        Berger--Oliger truncation-error estimator in classical AMR.
+  \item \textbf{Wavefront-trailing criterion:} a time-dependent band immediately
+        behind the propagating wavefront is tagged for reduced precision, while
+        the leading edge --- where phase accuracy governs the imaging condition
+        --- retains full precision.
+\end{itemize}
+
+For each criterion, we implement compensated (Kahan) summation in the
+low-precision tiles' time-stepping update to control round-off accumulation over
+the full simulation, following the mechanism identified by Gao and
+Harms~\cite{gao2023half}. We explicitly test for a ``precision-interface''
+artifact --- analogous to coarse-fine grid-interface reflections in mesh-based
+AMR --- via residual analysis at tile boundaries between differing precisions.
+Finally, each tile is assigned jointly a floating-point format and a checkpoint
+compression policy (full snapshot versus compressed delta), with combined
+accuracy measured by PSNR, SSIM, and mean relative error against the FP64
+baseline, on both the raw wavefield and the final migrated image. This phase
+subsumes differential checkpointing, which becomes the storage mechanism for
+\pamr{}-tagged tiles rather than a separate deliverable.
+
+\subsection{Phase 3 --- Precision-AMR without Native FP64 (M7--M10)}
+
+The tagging criteria validated in Phase 2 are applied on the RTX PRO 6000,
+hardware with negligible native FP64 throughput. Per tile, the pipeline selects
+between native low-precision tensor-core execution, cuBLAS mixed-precision GEMM
+(FP32 compute with FP64 accumulation) or cuSOLVER iterative refinement for dense
+sub-kernels, and Ozaki-scheme FP64 emulation for tiles flagged as
+accuracy-critical.
+
+\begin{itemize}
+  \item This directly operationalises the motivation for exploiting AI-first GPUs
+        that lack native FP64: expensive emulation is concentrated only where
+        \pamr{}'s criteria say it is needed.
+  \item We quantify the speedup/accuracy trade-off relative to a uniform-Ozaki
+        baseline (emulating FP64 everywhere) to determine how much selective
+        tiling actually saves.
+  \item All errors are bounded jointly (compression $\times$ precision
+        interaction) against the FP64 baseline using PSNR, SSIM, and mean
+        relative error, across the same three datasets and three checkpointing
+        algorithms (Revolve, zCut, Uniform) used throughout the project.
+  \item Exploratory cross-architecture activity: the same tagging and tiling logic
+        is ported to Santos Dumont's AMD Instinct MI300A nodes via ROCm/HIP, to
+        test whether the criteria and error-budget framework hold on a CDNA3
+        architecture without native access to Ozaki-scheme emulation or
+        nvCOMP/Bitcomp.
+\end{itemize}
+
+\subsection{Phase 4 --- Spectral Operators, Integration, and Release (M10--M12)}
+
+\begin{itemize}
+  \item Benchmark cuFFT-based pseudo-spectral derivative operators as an
+        alternative update rule for selected, precision-tagged tiles, as a
+        secondary technique complementing the core \pamr{} contribution.
+  \item Integrate the Precision-AMR module, differential checkpointing, and
+        mixed-precision paths into a unified GPUZIP v3.0 release.
+  \item Multi-node scaling evaluation on Santos Dumont ($\leq$8 GPUs).
+  \item Final analysis, write-up, and submission, with Precision-AMR as the
+        central scientific claim and differential checkpointing, mixed-precision
+        linear algebra, and spectral operators presented as supporting
+        techniques.
+\end{itemize}
+
+\section{Evaluation}
+
+All experiments span three datasets (Large, Marmousi3D, Salt), three
+checkpointing algorithms (Revolve, zCut, Uniform), and the four \pamr{} tagging
+criteria (individually and in combination). Kernel-level profiling uses Nsight
+Compute (roofline, memory-traffic breakdowns); timeline profiling uses Nsight
+Systems. Implementation is in C/C++ with CUDA under the HPC SDK, with OpenMP
+Cluster for multi-node scaling. Accuracy is evaluated on both the wavefield and
+the final RTM image, since a tiling that preserves wavefield PSNR/SSIM may still,
+in principle, shift the migrated image if error is spatially correlated with
+reflectors. For the cross-architecture activity, the same accuracy metrics are
+computed on Santos Dumont's AMD MI300A partition and compared against the NVIDIA
+baselines, to characterise how much of the achieved speedup and accuracy
+trade-off is architecture-independent.
+
+\section{Expected Results}
+
+Timeline (12 months):
+
+\begin{longtable}{@{}p{0.12\textwidth}p{0.5\textwidth}p{0.19\textwidth}p{0.09\textwidth}@{}}
+\toprule
+\textbf{Month} & \textbf{Activity} & \textbf{Hardware} & \textbf{Phase}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Month} & \textbf{Activity} & \textbf{Hardware} & \textbf{Phase}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+M1--M2 & Port Awave-3D + GPUZIP to HPC SDK (nvc++); reproduce V100 baselines;
+establish block/tile decomposition; Nsight Compute roofline profiling per tile.
+& RTX PRO 6000; Santos Dumont (V100) & 1\\
+\addlinespace
+M2--M5 & Design and implement Precision-AMR tagging criteria (PML proximity,
+energy density, adjoint sensitivity, wavefront-trailing band); compensated
+summation; precision-interface artifact testing. & Santos Dumont (H100) & 2\\
+\addlinespace
+M5--M6 & Unify precision and compression error budget via differential
+checkpointing; multi-node scaling; open-source GPUZIP v3.0-alpha release;
+reproducibility package (REDU). & Santos Dumont (H100, multi-node) & 2\\
+\addlinespace
+M7--M10 & Apply Precision-AMR tiling without native FP64: selective cuBLAS
+mixed-precision GEMM, cuSOLVER iterative refinement, and Ozaki-scheme FP64
+emulation only in accuracy-critical tiles. Exploratory port of the tagging
+framework to AMD Instinct MI300A via ROCm/HIP. & RTX PRO 6000; Santos Dumont
+(AMD MI300A, exploratory) & 3\\
+\addlinespace
+M10--M12 & cuFFT spectral-operator benchmark on selected tiles; unified GPUZIP
+v3.0 release; analysis, write-up, and paper submission. & RTX PRO 6000; Santos
+Dumont & 4\\
+\end{longtable}
+
+Projected outcomes: an open-source GPUZIP v3.0 release (MIT license, GitHub)
+built around a Precision-AMR module, with differential checkpointing,
+mixed-precision GEMM/Ozaki-scheme paths, and cuFFT spectral operators integrated
+as supporting components; a peer-reviewed publication with Precision-AMR as the
+central contribution (target: SBAC-PAD / Euro-Par / IJHPCA); and a public
+reproducibility package (datasets, Nsight profiles, quality metrics) via UNICAMP
+REDU.
+
+Dependencies: this hardware request is not conditional on being combined with
+another grant. Large-scale validation runs on the Santos Dumont supercomputer
+(LNCC/SINAPAD) through LNCC's own computational allocation program (SINAPAD),
+independent of this request. Existing institutional support funds personnel; none
+of these sources duplicates the RTX PRO 6000 request.
+
+\section{Project Support Details}
+
+We request one RTX PRO 6000 Blackwell GPU as dedicated local development
+hardware. Its abundant FP8/FP4 tensor-core throughput and negligible native FP64
+make it the scientifically relevant target for the selective-emulation study
+central to Phase 3: it forces the question of whether Precision-AMR's selective
+use of Ozaki-scheme emulation can match full-domain emulation at a fraction of
+the cost. As dedicated, queue-free hardware, it also supports the iterative
+day-to-day development that a shared batch system is not well suited for.
+Large-scale validation --- the \pamr{} criteria sweep across datasets and
+checkpointing algorithms, FP64 baseline generation, multi-GPU scaling, and the
+AMD MI300A portability test --- runs separately on the Santos Dumont
+supercomputer (LNCC/SINAPAD), accessed through LNCC's own allocation program and
+outside the scope of this request.
+
+\subsection*{Resource Request}
+
+\begin{longtable}{@{}p{0.3\textwidth}p{0.62\textwidth}@{}}
+\toprule
+\textbf{Resource} & \textbf{Request}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Physical hardware & 1$\times$ RTX PRO 6000 Blackwell --- dedicated local
+development hardware, used throughout the project\\
+\end{longtable}
+
+Compute time on Santos Dumont is requested separately through LNCC's own project
+allocation program (SINAPAD) and is not part of this hardware request.
+
+\bibliographystyle{plainnat}
+\bibliography{mixed-precision-amr-en}
+
+\end{document}
