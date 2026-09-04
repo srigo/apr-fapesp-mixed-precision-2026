@@ -160,15 +160,17 @@ replicadas diretamente nas duas versões, sem passar pelo ciclo de aprovação
 
 ## Compilação
 
-Cada pasta (`src/pt/`, `src/en/`) é buildada independentemente com
-`latexmk`:
+Os dois documentos usam a fonte Arial via `fontspec`, o que exige **XeLaTeX**
+(não `pdflatex`) — a diretiva `% !TEX program = xelatex` está na primeira
+linha de cada `.tex` para editores que a reconhecem. Cada pasta (`src/pt/`,
+`src/en/`) é buildada independentemente com `latexmk`:
 
 ```bash
-cd src/pt && latexmk -pdf -interaction=nonstopmode -halt-on-error mixed-precision-amr-pt.tex
-cd src/en && latexmk -pdf -interaction=nonstopmode -halt-on-error mixed-precision-amr-en.tex
+cd src/pt && latexmk -xelatex -interaction=nonstopmode -halt-on-error mixed-precision-amr-pt.tex
+cd src/en && latexmk -xelatex -interaction=nonstopmode -halt-on-error mixed-precision-amr-en.tex
 ```
 
-Isso roda `pdflatex → bibtex → pdflatex → pdflatex` automaticamente. Após
+Isso roda `xelatex → bibtex → xelatex → xelatex` automaticamente. Após
 compilar, checar o `.log` por citações/referências indefinidas:
 
 ```bash
@@ -179,12 +181,23 @@ Ao final, limpar os artefatos de build (mantendo o `.pdf`):
 
 ```bash
 latexmk -c mixed-precision-amr-<pt|en>.tex
-rm -f mixed-precision-amr-<pt|en>.bbl
+rm -f mixed-precision-amr-<pt|en>.bbl mixed-precision-amr-<pt|en>.xdv
 ```
 
 Os arquivos temporários (`.aux`, `.bbl`, `.blg`, `.fdb_latexmk`, `.fls`,
-`.log`, `.out`, `.synctex.gz`) já estão listados no `.gitignore` de cada
-pasta e não devem ser versionados.
+`.log`, `.out`, `.synctex.gz`, `.xdv`) já estão listados no `.gitignore` de
+cada pasta e não devem ser versionados.
+
+### Formatação aplicada (padrão FAPESP APR)
+
+Ambos os `.tex` já seguem o roteiro de formatação da FAPESP na base do
+documento: `\setmainfont{Arial}` a 12pt (`\documentclass[12pt,...]`),
+`\onehalfspacing` (pacote `setspace`) e margens via `geometry`
+(`left=3cm,right=1.5cm,top=2.5cm,bottom=2.5cm` — a FAPESP só especifica as
+margens esquerda e direita; topo/base ficam em 2.5cm por padrão razoável).
+Não desfazer esses ajustes ao editar o preâmbulo; qualquer alteração de
+fonte/espaçamento/margem deve ser justificada e apontada ao usuário, pois
+mexe diretamente em requisito de submissão do APR.
 
 ## Entrega ao usuário
 
