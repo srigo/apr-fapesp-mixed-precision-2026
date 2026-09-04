@@ -133,9 +133,9 @@ de compressão com perdas do checkpointing diferencial em uma única meta de
 precisão por bloco, conjuntamente ajustada. O GEMM de precisão mista, o
 refinamento iterativo do cuSOLVER e a emulação de FP64 pelo esquema de Ozaki
 continuam essenciais como técnicas de suporte, mas passam a ser aplicados
-seletivamente, apenas onde os critérios do \pamr{} indicam necessidade ---
-a forma natural de explorar GPUs orientadas primariamente para IA, como a RTX
-PRO 6000 Blackwell, que oferecem vazão nativa de FP64 desprezível.
+seletivamente, apenas onde os critérios do \pamr{} indicam necessidade.
+Essa é a forma natural de explorar GPUs orientadas primariamente para IA,
+como a RTX 5090, que oferecem vazão nativa de FP64 desprezível.
 
 Como os critérios de marcação são motivados pela física da propagação de
 ondas e pela sensibilidade adjunta, e não pelas unidades aritméticas de um
@@ -183,6 +183,353 @@ IJHPCA ou um periódico do tipo \emph{Transactions} da IEEE ou da ACM entre
 os periódicos, acompanhado de um pacote público de reprodutibilidade
 (conjuntos de dados, perfis do Nsight, métricas de qualidade),
 disponibilizado via REDU da UNICAMP.
+
+\section{Desafios Científicos e Tecnológicos e os Meios e Métodos para
+Superá-los}
+
+A viabilidade do refinamento adaptativo de malha (AMR) para reduzir o custo
+computacional da simulação sísmica já está bem estabelecida na literatura.
+van Driel et al.~\cite{vandriel2020wavefield1} e
+Thrastarson et al.~\cite{thrastarson2020wavefield2} mostram,
+respectivamente, que malhas adaptadas ao campo de onda aceleram a
+modelagem direta/adjunta e a FWI em até uma ordem de grandeza quando as
+propriedades do meio variam suavemente; Yang et al.~\cite{yang2024elasticrtm}
+aplicam uma malha de espaçamento variável especificamente à RTM elástica,
+preservando a acurácia de imageamento multicomponente ao mesmo tempo em que
+reduzem custo computacional e armazenamento. Davis e
+LeVeque~\cite{davis2015adjoint} mostram, ainda, que indicadores de
+refinamento guiados pelo cálculo adjunto, e não apenas pela suavidade
+local do campo, produzem refinamentos de malha mais eficientes em
+problemas de propagação de ondas hiperbólicas, a mesma lógica que motiva o
+critério de sensibilidade (FWI) do \pamr{}. Nenhum desses trabalhos, no
+entanto, varia a \emph{precisão de ponto flutuante} em vez da
+\emph{resolução da malha}. Nenhum caracteriza empiricamente, tampouco, como
+o comportamento numérico de uma simulação RTM/FWI, isto é, o \emph{range}
+dinâmico de valores de ponto flutuante efetivamente exercitado, se
+distribui no espaço e no tempo. Essa lacuna dupla, a ausência de um esquema
+de zoneamento de precisão fisicamente motivado e a ausência de
+caracterização empírica que o fundamente antes do desenho dos critérios,
+define os desafios científicos e tecnológicos deste projeto, organizados
+nas seis fases a seguir, ao longo de um programa de 36 meses.
+
+\subsection{Fase 1 --- Infraestrutura e Linha de Base (M1--M4)}
+
+\textbf{Desafio:} antes de qualquer alteração de precisão, é preciso
+reproduzir fielmente as linhas de base do GPUZIP/Awave-3D sob o HPC SDK e
+garantir que a decomposição em blocos usada para checkpointing possa
+também carregar uma marca de precisão por bloco, um pré-requisito de
+engenharia do qual todas as fases seguintes dependem.
+
+\textbf{Método:} portar o Awave-3D e o GPUZIP para o HPC SDK (nvc++),
+reintegrar o nvCOMP/Bitcomp e reproduzir as linhas de base em V100 na
+partição V100 do Santos Dumont, compatível com o hardware original do
+GPUZIP.
+
+\begin{itemize}
+  \item Estabelecer uma decomposição do domínio em blocos/\emph{tiles},
+        estendendo a estrutura de blocos de checkpoint já existente para
+        que também possa carregar uma marca (\emph{tag}) de precisão por
+        bloco.
+  \item Perfilar (\emph{profile}) todos os kernels com Nsight Systems e
+        Nsight Compute, tanto na RTX 5090 quanto no Santos Dumont,
+        confirmando que os estênceis de diferenças finitas (FDM) são
+        limitados pela largura de banda de memória na granularidade de
+        bloco antes de qualquer alteração de precisão ser tentada.
+\end{itemize}
+
+\subsection{Fase 2 --- Caracterização Empírica do Comportamento de
+Precisão Mista (M4--M10)}
+
+\textbf{Desafio:} os quatro critérios de marcação propostos na Fase 3 são
+fisicamente motivados, mas, diferentemente do refinamento de malha
+guiado pelo adjunto de Davis e LeVeque~\cite{davis2015adjoint}, nenhum
+trabalho na literatura caracteriza empiricamente como o \emph{range}
+dinâmico de ponto flutuante (expoentes e magnitudes efetivamente usados)
+se comporta espaço-temporalmente numa simulação RTM/FWI, nem investiga se
+esse comportamento pode ser antecipado diretamente a partir do modelo de
+velocidade de entrada, antes mesmo de a onda se propagar. Sem essa
+caracterização, os critérios de marcação permanecem hipóteses plausíveis,
+mas não verificadas contra o comportamento numérico real.
+
+\textbf{Método:} instrumentar o solucionador para registrar, a partir de
+execuções de referência em FP64, estatísticas do \emph{range} dinâmico do
+campo de onda por bloco e por passo de tempo: histograma de expoentes,
+magnitude mínima/máxima, variância, nos três conjuntos de dados
+(Large, Marmousi3D, Salt).
+
+\begin{itemize}
+  \item Correlacionar essas estatísticas com atributos derivados do
+        modelo de velocidade de entrada (contraste de impedância local,
+        profundidade, distância a refletores, comprimento de onda local),
+        buscando quais atributos são preditivos de onde o \emph{range}
+        dinâmico, e portanto a tolerância a erro de arredondamento,
+        é estruturalmente menor.
+  \item A partir dessa correlação, construir um estimador \emph{a priori}
+        de zoneamento de precisão, calculável diretamente do modelo de
+        velocidade antes de qualquer passo de tempo ser executado. Esse
+        estimador é complementar aos quatro critérios reativos da Fase 3,
+        que dependem do campo de onda calculado durante a própria
+        simulação.
+  \item Usar essa caracterização para validar (ou refutar) as premissas
+        físicas por trás de cada um dos quatro critérios propostos, antes
+        de investir na sua implementação e ajuste fino na Fase 3.
+\end{itemize}
+
+\subsection{Fase 3 --- Precision-AMR: Critérios, Marcação e Validação
+(M10--M20)}
+
+\textbf{Desafio:} diferentemente do AMR baseado em malha, onde o artefato
+característico é uma reflexão localizada na interface grossa-fina, o ruído
+de arredondamento induzido pela precisão se propaga junto com a própria
+onda, de modo que os critérios de marcação não podem se apoiar apenas na
+suavidade local do campo (como os indicadores clássicos de refinamento);
+precisam antecipar onde um erro, uma vez injetado, deixará de alcançar os
+receptores ou o gradiente do FWI antes do fim da simulação. Some-se a isso
+um segundo desafio, tecnológico: precisão reduzida e compressão com perdas,
+ambas já usadas isoladamente no GPUZIP, podem interagir de forma não
+trivial quando aplicadas ao mesmo bloco, e essa interação precisa ser
+isolada antes de se definir um orçamento de erro conjunto.
+
+\textbf{Método:} esta é a fase científica central, executada em escala na
+partição H100 do Santos Dumont. Com base na caracterização da Fase 2,
+projetamos, implementamos e validamos quatro critérios candidatos de
+marcação para o zoneamento espacial de precisão:
+
+\begin{itemize}
+  \item \textbf{Critério de borda:} blocos dentro ou adjacentes à camada
+        absorvente PML são marcados por padrão para precisão reduzida, já
+        que sua contribuição já está sendo amortecida.
+  \item \textbf{Critério de energia:} os blocos são marcados por um
+        limiar sobre a densidade de energia local do campo de onda, de
+        modo que regiões de baixa amplitude (antes da chegada da frente
+        de onda, ou após o espalhamento geométrico ter atenuado o sinal)
+        tolerem menor precisão.
+  \item \textbf{Critério de sensibilidade (FWI):} os blocos são marcados
+        pela magnitude do kernel de sensibilidade adjunta local,
+        reaproveitando o próprio cálculo de gradiente como sinal de
+        marcação, em analogia direta ao refinamento guiado pelo adjunto
+        de Davis e LeVeque~\cite{davis2015adjoint} e ao estimador de erro
+        de truncamento de Berger--Oliger no AMR clássico.
+  \item \textbf{Critério de esteira da frente de onda:} uma faixa
+        dependente do tempo, imediatamente atrás da frente de onda em
+        propagação, é marcada para precisão reduzida, enquanto a borda
+        dianteira, onde a precisão de fase rege a condição de
+        imageamento, mantém precisão plena.
+\end{itemize}
+
+Para cada critério, implementamos a somatória compensada (de Kahan) na
+atualização de integração no tempo dos blocos de baixa precisão, para
+controlar o acúmulo de arredondamento ao longo de toda a simulação,
+seguindo o mecanismo identificado por Gao e Harms~\cite{gao2023half}.
+Testamos explicitamente a ocorrência de um artefato de ``interface de
+precisão'', análogo às reflexões de interface grossa-fina do AMR
+baseado em malha, via análise de resíduo nas fronteiras entre blocos
+de precisões diferentes.
+
+Para isolar os efeitos da precisão mista dos efeitos da compressão com
+perdas antes de uni-los em um único orçamento de erro por bloco, cada
+região candidata a marcação é avaliada sob quatro condições, sempre
+comparadas contra a referência em FP64 por PSNR, SSIM e erro relativo
+médio, tanto no campo de onda bruto quanto na imagem migrada final:
+
+\begin{enumerate}
+  \item precisão plena, sem compressão (controle);
+  \item precisão plena, com compressão diferencial (isola o efeito da
+        compressão);
+  \item precisão reduzida, sem compressão (isola o efeito da precisão);
+  \item precisão reduzida, com compressão diferencial (condição
+        efetivamente empregada em produção).
+\end{enumerate}
+
+Comparar as condições (ii)+(iii) contra (iv) indica se os dois efeitos são
+aproximadamente aditivos, se um mascara o outro, ou se há amplificação por
+interação. Só então cada bloco recebe conjuntamente um formato de ponto
+flutuante e uma política de compressão de checkpoint (\emph{snapshot}
+completo versus delta comprimido), como um único orçamento de erro
+conjuntamente ajustado. Esta fase absorve o checkpointing diferencial, que
+passa a ser o mecanismo de armazenamento para os blocos marcados pelo
+\pamr{}, em vez de um entregável separado.
+
+\subsection{Fase 4 --- Precision-AMR sem FP64 Nativo (M19--M27)}
+
+\textbf{Desafio:} GPUs orientadas primariamente para IA, como a RTX 5090,
+oferecem vazão nativa de FP64 desprezível; emular FP64 em todo o domínio
+via o esquema de Ozaki~\cite{uchino2025ozaki} é tecnicamente viável, mas
+caro o suficiente para inviabilizar seu uso indiscriminado, o que só
+reforça a necessidade de aplicá-lo seletivamente.
+
+\textbf{Método:} os critérios de marcação validados na Fase 3 são
+aplicados na RTX 5090. Por bloco, o \emph{pipeline} seleciona entre
+execução nativa de baixa precisão em tensor cores, GEMM de precisão mista
+via cuBLAS (computação em FP32 com acumulação em FP64) ou refinamento
+iterativo do cuSOLVER para subkernels densos, e emulação de FP64 pelo
+esquema de Ozaki para blocos sinalizados como críticos para a precisão.
+
+\begin{itemize}
+  \item Isso operacionaliza diretamente a motivação de explorar GPUs
+        voltadas primariamente para IA que carecem de FP64 nativo: a
+        emulação, cara, é concentrada apenas onde os critérios do
+        \pamr{} indicam necessidade.
+  \item Quantificamos o compromisso entre ganho de desempenho e precisão
+        em relação a uma linha de base com Ozaki uniforme (emulando FP64
+        em todo o domínio), para determinar quanto o \emph{tiling}
+        seletivo realmente economiza.
+  \item Todos os erros são delimitados conjuntamente (interação
+        compressão $\times$ precisão, seguindo a metodologia da Fase 3)
+        em relação à linha de base em FP64, usando PSNR, SSIM e erro
+        relativo médio, nos mesmos três conjuntos de dados e três
+        algoritmos de checkpointing (Revolve, zCut, Uniform) usados ao
+        longo de todo o projeto.
+\end{itemize}
+
+\subsection{Fase 5 --- Validação Cross-Arquitetura (AMD Instinct MI300A)
+(M26--M31)}
+
+\textbf{Desafio:} os critérios de marcação são motivados pela física da
+propagação de ondas e pela sensibilidade adjunta, não pelas unidades
+aritméticas de um fabricante específico. Essa portabilidade, porém, é uma
+afirmação que precisa ser testada, não apenas presumida, especialmente
+porque a AMD não oferece equivalente direto ao esquema de Ozaki nem ao
+nvCOMP/Bitcomp.
+
+\textbf{Método:} com o tempo dedicado que um programa de 36 meses permite,
+portamos a mesma lógica de marcação e \emph{tiling} para os nós AMD
+Instinct MI300A do Santos Dumont via ROCm/HIP (rocBLAS, hipBLAS e os
+próprios caminhos de matriz de precisão reduzida da AMD), sem assumir
+paridade de recursos com o caminho CUDA-específico.
+
+\begin{itemize}
+  \item Testamos se os critérios da Fase 3 e a metodologia fatorial de
+        precisão $\times$ compressão da Fase 3 se sustentam em uma
+        arquitetura CDNA3, reexecutando o mesmo protocolo de avaliação
+        usado nas GPUs NVIDIA.
+  \item Testamos se o estimador \emph{a priori} construído na Fase 2,
+        derivado do modelo de velocidade e independente de arquitetura,
+        transfere diretamente, sem reajuste, para o MI300A.
+  \item Comparamos o compromisso entre desempenho e precisão alcançado no
+        MI300A contra as linhas de base NVIDIA, para caracterizar quanto
+        do ganho é arquitetura-independente e quanto é específico da pilha
+        CUDA/Ozaki/nvCOMP.
+\end{itemize}
+
+\subsection{Fase 6 --- Operadores Espectrais, Integração e Lançamento
+(M31--M36)}
+
+\textbf{Desafio:} consolidar as técnicas de suporte (checkpointing
+diferencial, GEMM de precisão mista, emulação de Ozaki, operadores
+espectrais) e o módulo Precision-AMR num único artefato de software
+coerente e reutilizável, a biblioteca P-AMR descrita nos Resultados
+Esperados, em vez de deixá-las como protótipos isolados de cada fase.
+
+\textbf{Método:}
+
+\begin{itemize}
+  \item Avaliar operadores de derivada pseudo-espectrais baseados em
+        cuFFT como regra de atualização alternativa para blocos
+        selecionados, marcados por precisão, como técnica secundária que
+        complementa a contribuição central do \pamr{}.
+  \item Integrar o módulo Precision-AMR, já como biblioteca
+        independente, o checkpointing diferencial e os caminhos de
+        precisão mista em um lançamento unificado do GPUZIP v3.0.
+  \item Avaliação de escalabilidade multi-nó no Santos Dumont
+        ($\leq$8 GPUs).
+  \item Análise final, redação e submissão, com o Precision-AMR como
+        contribuição científica central e o checkpointing diferencial, a
+        álgebra linear de precisão mista e os operadores espectrais
+        apresentados como técnicas de suporte.
+\end{itemize}
+
+\subsection{Plataformas Computacionais}
+
+\paragraph{HPC SDK} (nvc++/nvfortran, bibliotecas matemáticas CUDA-X, Nsight
+Systems/Compute). Experiência: a equipe usa CUDA e Nsight Systems
+rotineiramente. Adoção: migrar a compilação do Awave-3D de clang para nvc++ e
+validar a paridade numérica em relação às linhas de base (\emph{baselines})
+existentes. O Nsight Compute fornece análise \emph{roofline} em nível de
+kernel, agora aplicada por bloco espacial, para identificar quais blocos são
+limitados pela largura de banda de memória versus limitados por computação, e
+para delimitar objetivamente onde um bloco de menor precisão realmente
+compensa.
+
+\paragraph{RTX 5090} (hardware dedicado, solicitado, 32\,GB GDDR7 + servidor
+com 64\,GB de RAM). Esta GPU também é baseada na arquitetura Blackwell e
+compartilha com as placas profissionais da mesma geração a mesma banda de
+memória (1.792\,GB/s) e os mesmos tensor cores de 5ª geração, com suporte a
+FP8/FP4 e vazão nativa de FP64 desprezível. Para um solucionador de
+diferenças finitas limitado pela banda de memória, como o nosso, é a banda
+de memória, e não a contagem bruta de núcleos CUDA, que determina o
+desempenho. Isso torna a RTX 5090 uma plataforma de desenvolvimento
+representativa para o \pamr{}, a uma fração do custo de uma placa
+profissional equivalente e dentro do teto de valor por equipamento
+estabelecido pelas regras do Auxílio à Pesquisa Regular da FAPESP para este
+tipo de solicitação. A ausência de FP64 nativo rápido não é uma desvantagem
+nova: é exatamente o regime de precisão que o \pamr{} já pressupõe e
+explora, via emulação pelo esquema de Ozaki e GEMM em precisão mista, de
+modo que a questão científica que este projeto responde, precisamente quais
+blocos precisam de FP64 emulado e quais não precisam, permanece a mesma. Os
+32\,GB de GDDR7 (sem ECC) sustentam a iteração de kernels e o ajuste dos
+critérios de marcação em subconjuntos representativos do domínio; por se
+tratar de hardware dedicado e sem fila de espera, permite depuração
+iterativa rápida, algo para o qual um sistema de lote compartilhado não é
+bem adequado. A referência de verdade em FP64 e a validação em produção
+continuam sendo geradas no Santos Dumont, com memória protegida por ECC.
+
+\paragraph{Santos Dumont} (LNCC/SINAPAD, supercomputador nacional Tier-0,
+Petrópolis-RJ). Fornece o ambiente de validação em larga escala. Sua partição
+BullSequana X1000 inclui 94 nós com 4$\times$ GPUs NVIDIA Volta V100 cada,
+compatível com o hardware usado nas linhas de base originais do GPUZIP,
+além de um nó de IA dedicado com 8$\times$ V100 de 16GB via NVLink. Sua
+partição mais recente, BullSequana XH3000, acrescenta 62 nós com 4$\times$
+NVIDIA Hopper H100 SXM de 80GB via NVLink, 36 nós com superchips NVIDIA
+Grace-Hopper GH200, e 18 nós com 2$\times$ APUs AMD Instinct MI300A (núcleos
+de GPU CDNA3, 128\,GB de HBM3 cada). Essa heterogeneidade nos permite gerar a
+referência de verdade (\emph{ground truth}) em FP64 e executar em escala a
+varredura completa dos critérios do \pamr{} em hardware NVIDIA, além de testar
+separadamente se a metodologia de marcação e a abordagem de tiling em blocos
+generalizam para uma arquitetura não NVIDIA.
+
+\paragraph{nvCOMP / Bitcomp} (compressor com perdas executado na GPU).
+Experiência: integrado e validado no GPUZIP v2.0, onde o Bitcomp apresentou o
+melhor equilíbrio entre precisão e compressão na V100. Adoção aqui: o
+mecanismo de armazenamento do checkpointing diferencial, agora indexado pelos
+mesmos identificadores de bloco usados na marcação de precisão, de modo que
+cada bloco carrega um único orçamento de erro conjuntamente ajustado para
+precisão e compressão.
+
+\paragraph{cuBLAS (extensões de precisão mista) e cuSOLVER (refinamento
+iterativo).} Ambos vêm incluídos no HPC SDK. Experiência: a equipe já utilizou
+rotinas BLAS/LAPACK em trabalhos anteriores de HPC. Adoção: aplicados apenas
+nos blocos que o \pamr{} sinaliza como contendo subkernels densos que
+necessitam de precisão além da baixa precisão nativa (computação em FP32 com
+acumulação em FP64, e refinamento iterativo do cuSOLVER).
+
+\paragraph{Emulação de FP64 pelo esquema de Ozaki} via tensor cores de baixa
+precisão. Adoção: reservada ao subconjunto de blocos que os critérios de
+sensibilidade do \pamr{} marcam como críticos para a precisão (próximos à
+frente de onda, com alta magnitude de sensibilidade adjunta), em vez de
+aplicada uniformemente. Isso testa diretamente se a emulação seletiva é mais
+barata do que emular em todo o domínio, preservando a fidelidade da imagem.
+Trabalhos recentes demonstraram ganhos de até 2,3$\times$ em relação ao DGEMM
+nativo em FP64 em GPUs Blackwell~\cite{uchino2025ozaki}, medidos na placa
+profissional RTX PRO 6000; esperamos resultados comparáveis na RTX 5090,
+já que ambas compartilham a mesma geração de tensor cores.
+
+\paragraph{cuFFT.} Experiência: utilizado em trabalhos anteriores com
+operadores espectrais. Adoção: avaliado como alternativa aos estênceis de
+diferenças finitas (FDM) para a atualização do campo de onda dentro de blocos
+selecionados, marcados por precisão, caracterizando o compromisso entre
+largura de banda de memória e computação em relação ao caminho padrão de
+diferenças finitas.
+
+\paragraph{AMD Instinct MI300A} (CDNA3, Santos Dumont, exploratório). Como
+atividade adicional de validação, avaliamos quanto do framework \pamr{},
+isto é, a decomposição em blocos/tiles, os quatro critérios de marcação e o
+orçamento conjunto de erro de precisão e compressão, se transfere para o
+ecossistema ROCm/HIP da AMD (rocBLAS, hipBLAS e os próprios caminhos de
+matriz de precisão reduzida da AMD), sem assumir paridade de recursos com a
+emulação do esquema de Ozaki, específica da CUDA, ou com o caminho de
+compressão nvCOMP/Bitcomp. O objetivo é determinar se o Precision-AMR é uma
+metodologia portável ou uma otimização específica da NVIDIA.
 
 % ============================================================================
 % BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
@@ -252,6 +599,15 @@ arquiteturas; computação em GPU; compressão com perdas; checkpointing.
 % FIM DO BLOCO ANTIGO (Resumo)
 % ============================================================================
 
+% ============================================================================
+% BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
+% Conteúdo movido para a subseção "Plataformas Computacionais" ao final da
+% seção "Desafios Científicos e Tecnológicos..." (após a Fase 6), já que o
+% roteiro FAPESP não prevê uma seção própria para isso.
+% Remover apenas após aprovação final da versão reestruturada.
+% ============================================================================
+\iffalse
+
 \section{Plataformas Computacionais}
 
 \paragraph{HPC SDK} (nvc++/nvfortran, bibliotecas matemáticas CUDA-X, Nsight
@@ -276,8 +632,8 @@ lote compartilhado não é bem adequado.
 
 \paragraph{Santos Dumont} (LNCC/SINAPAD, supercomputador nacional Tier-0,
 Petrópolis-RJ). Fornece o ambiente de validação em larga escala. Sua partição
-BullSequana X1000 inclui 94 nós com 4$\times$ GPUs NVIDIA Volta V100 cada ---
-compatível com o hardware usado nas linhas de base originais do GPUZIP ---
+BullSequana X1000 inclui 94 nós com 4$\times$ GPUs NVIDIA Volta V100 cada,
+compatível com o hardware usado nas linhas de base originais do GPUZIP,
 além de um nó de IA dedicado com 8$\times$ V100 de 16GB via NVLink. Sua
 partição mais recente, BullSequana XH3000, acrescenta 62 nós com 4$\times$
 NVIDIA Hopper H100 SXM de 80GB via NVLink, 36 nós com superchips NVIDIA
@@ -307,7 +663,7 @@ acumulação em FP64, e refinamento iterativo do cuSOLVER).
 precisão. Adoção: reservada ao subconjunto de blocos que os critérios de
 sensibilidade do \pamr{} marcam como críticos para a precisão (próximos à
 frente de onda, com alta magnitude de sensibilidade adjunta), em vez de
-aplicada uniformemente --- testando diretamente se a emulação seletiva é mais
+aplicada uniformemente. Isso testa diretamente se a emulação seletiva é mais
 barata do que emular em todo o domínio, preservando a fidelidade da imagem.
 Trabalhos recentes demonstraram ganhos de até 2,3$\times$ em relação ao DGEMM
 nativo em FP64 na RTX PRO 6000 Blackwell~\cite{uchino2025ozaki}.
@@ -320,14 +676,29 @@ largura de banda de memória e computação em relação ao caminho padrão de
 diferenças finitas.
 
 \paragraph{AMD Instinct MI300A} (CDNA3, Santos Dumont, exploratório). Como
-atividade adicional de validação, avaliamos quanto do framework \pamr{} --- a
-decomposição em blocos/tiles, os quatro critérios de marcação e o orçamento
-conjunto de erro de precisão e compressão --- se transfere para o ecossistema
+atividade adicional de validação, avaliamos quanto do framework \pamr{},
+isto é, a decomposição em blocos/tiles, os quatro critérios de marcação e o
+orçamento conjunto de erro de precisão e compressão, se transfere para o
+ecossistema
 ROCm/HIP da AMD (rocBLAS, hipBLAS e os próprios caminhos de matriz de precisão
 reduzida da AMD), sem assumir paridade de recursos com a emulação do esquema
 de Ozaki, específica da CUDA, ou com o caminho de compressão nvCOMP/Bitcomp. O
 objetivo é determinar se o Precision-AMR é uma metodologia portável ou uma
 otimização específica da NVIDIA.
+
+\fi
+% ============================================================================
+% FIM DO BLOCO ANTIGO (Plataformas Computacionais)
+% ============================================================================
+
+% ============================================================================
+% SEÇÃO DESNECESSÁRIA PARA O APR --- preservada comentada, não é bloco
+% antigo de reestruturação. "Conjunto de Dados e Modelo" era exigida por
+% outra chamada da FAPESP (não o roteiro do APR) e não tem equivalente na
+% estrutura obrigatória do APR. Mantida aqui apenas como referência, caso
+% seja necessária de volta; decisão do usuário em 2026-09-04.
+% ============================================================================
+\iffalse
 
 \section{Conjunto de Dados e Modelo}
 
@@ -346,6 +717,11 @@ otimização específica da NVIDIA.
         Campinas, Brasil; preparado para envio aos sistemas de arquivos
         paralelos do Santos Dumont para as execuções em larga escala.
 \end{itemize}
+
+\fi
+% ============================================================================
+% FIM DA SEÇÃO DESNECESSÁRIA (Conjunto de Dados e Modelo)
+% ============================================================================
 
 % ============================================================================
 % BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
@@ -447,6 +823,15 @@ afirmá-la.
 % ============================================================================
 % FIM DO BLOCO ANTIGO (Introdução)
 % ============================================================================
+
+% ============================================================================
+% BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
+% Conteúdo reorganizado (com nova Fase 2 de caracterização empírica, Fase 5
+% de validação cross-arquitetura destacada, e cronograma estendido para 36
+% meses) na nova seção "Desafios Científicos e Tecnológicos..." acima.
+% Remover apenas após aprovação final da versão reestruturada.
+% ============================================================================
+\iffalse
 
 \section{Métodos}
 
@@ -558,6 +943,11 @@ pelo esquema de Ozaki para blocos sinalizados como críticos para a precisão.
         apresentados como técnicas de suporte.
 \end{itemize}
 
+\fi
+% ============================================================================
+% FIM DO BLOCO ANTIGO (Métodos)
+% ============================================================================
+
 \section{Avaliação}
 
 Todos os experimentos abrangem três conjuntos de dados (Large, Marmousi3D,
@@ -650,18 +1040,25 @@ fontes duplica a solicitação da RTX PRO 6000.
 
 \section{Detalhes do Apoio ao Projeto}
 
-Solicitamos uma GPU RTX PRO 6000 Blackwell como hardware de desenvolvimento
-local dedicado. Sua abundante vazão de tensor cores em FP8/FP4 e sua vazão
-nativa de FP64 desprezível a tornam o alvo cientificamente relevante para o
-estudo de emulação seletiva central à Fase 3: ela força a questão de saber se
-o uso seletivo de emulação pelo esquema de Ozaki pelo Precision-AMR consegue
-igualar a emulação em todo o domínio a uma fração do custo. Por se tratar de
+Solicitamos um servidor local dedicado equipado com uma GPU NVIDIA RTX 5090
+(32\,GB GDDR7) e 64\,GB de RAM, com custo estimado de até R\$~55.000 no
+Brasil, dentro do teto de valor por equipamento estabelecido pelas regras
+do Auxílio à Pesquisa Regular da FAPESP. Essa GPU compartilha com as placas
+profissionais da mesma geração Blackwell a mesma banda de memória
+(1.792\,GB/s) e os mesmos tensor cores de 5ª geração, o que a torna
+representativa para o desenvolvimento de kernels de um solucionador
+limitado pela banda de memória como o nosso, a uma fração do custo de uma
+placa profissional equivalente. Sua vazão nativa de FP64 desprezível a
+torna o alvo cientificamente relevante para o estudo de emulação seletiva
+central à Fase 4: ela força a questão de saber se o uso seletivo de
+emulação pelo esquema de Ozaki pelo Precision-AMR consegue igualar a
+emulação em todo o domínio a uma fração do custo. Por se tratar de
 hardware dedicado e sem fila de espera, também sustenta o desenvolvimento
 iterativo cotidiano para o qual um sistema de lote compartilhado não é bem
-adequado. A validação em larga escala --- a varredura dos critérios do \pamr{}
-entre conjuntos de dados e algoritmos de checkpointing, a geração da linha de
-base em FP64, a escalabilidade multi-GPU e o teste de portabilidade para o AMD
-MI300A --- é executada separadamente no supercomputador Santos Dumont
+adequado. A validação em larga escala, isto é, a varredura dos critérios do
+\pamr{} entre conjuntos de dados e algoritmos de checkpointing, a geração da
+linha de base em FP64, a escalabilidade multi-GPU e o teste de portabilidade
+para o AMD MI300A, é executada separadamente no supercomputador Santos Dumont
 (LNCC/SINAPAD), acessado por meio do próprio programa de alocação do LNCC e
 fora do escopo desta solicitação.
 
@@ -674,8 +1071,9 @@ fora do escopo desta solicitação.
 \endhead
 \bottomrule
 \endfoot
-Hardware físico & 1$\times$ RTX PRO 6000 Blackwell --- hardware de
-desenvolvimento local dedicado, utilizado ao longo de todo o projeto\\
+Hardware físico & 1$\times$ servidor com GPU NVIDIA RTX 5090 (32\,GB
+GDDR7) e 64\,GB de RAM, hardware de desenvolvimento local dedicado,
+utilizado ao longo de todo o projeto (custo estimado: até R\$~55.000)\\
 \end{longtable}
 
 O tempo de computação no Santos Dumont é solicitado separadamente por meio do

@@ -128,9 +128,8 @@ of differential checkpointing into a single, jointly tuned per-tile accuracy
 target. Mixed-precision GEMM, cuSOLVER iterative refinement, and
 Ozaki-scheme FP64 emulation remain essential as supporting techniques, but
 are now applied selectively, only where \pamr{}'s criteria indicate they are
-needed --- the natural way to exploit GPUs geared primarily toward AI, such
-as the RTX PRO 6000 Blackwell, which offer negligible native FP64
-throughput.
+needed. This is the natural way to exploit GPUs geared primarily toward AI,
+such as the RTX 5090, which offer negligible native FP64 throughput.
 
 Because the tagging criteria are motivated by the physics of wave
 propagation and adjoint sensitivity, rather than by any particular vendor's
@@ -177,6 +176,330 @@ high-performance-computing event or journal, for example, Supercomputing
 Transactions-type journal from IEEE or ACM among the journals, accompanied
 by a public reproducibility package (datasets, Nsight profiles, quality
 metrics), made available via UNICAMP's REDU.
+
+\section{Scientific and Technological Challenges and the Means and Methods
+to Overcome Them}
+
+The feasibility of adaptive mesh refinement (AMR) for reducing the
+computational cost of seismic simulation is already well established in
+the literature. van Driel et al.~\cite{vandriel2020wavefield1} and
+Thrastarson et al.~\cite{thrastarson2020wavefield2} show, respectively,
+that wavefield-adapted meshes accelerate forward/adjoint modelling and FWI
+by up to an order of magnitude when medium properties vary smoothly. Yang
+et al.~\cite{yang2024elasticrtm} apply a variable-spacing mesh specifically
+to elastic RTM, preserving multicomponent imaging accuracy while reducing
+computational cost and storage. Davis and LeVeque~\cite{davis2015adjoint}
+further show that refinement indicators guided by the adjoint computation,
+and not just by local smoothness of the field, produce more efficient mesh
+refinements in hyperbolic wave-propagation problems, the same logic that
+motivates \pamr{}'s sensitivity (FWI) criterion. None of these works,
+however, varies \emph{floating-point precision} instead of \emph{mesh
+resolution}. Nor does any of them characterize empirically how the
+numerical behavior of an RTM/FWI simulation, that is, the dynamic range of
+floating-point values actually exercised, distributes across space and
+time. This double gap, the absence of a physically motivated
+precision-zoning scheme and the absence of the empirical characterization
+needed to ground it before designing the criteria, defines this project's
+scientific and technological challenges, organized in the six phases
+below, over a 36-month programme.
+
+\subsection{Phase 1 --- Infrastructure and Baseline (M1--M4)}
+
+\textbf{Challenge:} before any precision change is attempted, it is
+necessary to faithfully reproduce the GPUZIP/Awave-3D baselines under the
+HPC SDK and ensure that the block decomposition used for checkpointing can
+also carry a per-block precision tag, an engineering prerequisite that
+every subsequent phase depends on.
+
+\textbf{Method:} port Awave-3D and GPUZIP to the HPC SDK (nvc++),
+re-integrate nvCOMP/Bitcomp, and reproduce the V100 baselines on Santos
+Dumont's V100 partition, matching the original GPUZIP hardware.
+
+\begin{itemize}
+  \item Establish a block/tile decomposition of the domain, extending the
+        existing checkpoint-block structure so that it can also carry a
+        precision tag per block.
+  \item Profile every kernel with Nsight Systems and Nsight Compute, on
+        both the RTX 5090 and Santos Dumont, confirming that FDM stencils
+        are memory-bandwidth-bound at the tile granularity before any
+        precision change is attempted.
+\end{itemize}
+
+\subsection{Phase 2 --- Empirical Characterization of Mixed-Precision
+Behavior (M4--M10)}
+
+\textbf{Challenge:} the four tagging criteria proposed for Phase 3 are
+physically motivated, but, unlike the adjoint-guided mesh refinement of
+Davis and LeVeque~\cite{davis2015adjoint}, no work in the literature
+empirically characterizes how the dynamic range of floating-point values
+(exponents and magnitudes actually used) behaves spatiotemporally in an
+RTM/FWI simulation, nor investigates whether that behavior can be
+anticipated directly from the input velocity model, before the wave even
+propagates. Without that characterization, the tagging criteria remain
+plausible hypotheses that have not yet been verified against actual
+numerical behavior.
+
+\textbf{Method:} instrument the solver to record, from FP64 reference
+runs, dynamic-range statistics of the wavefield per block and per time
+step: exponent histogram, minimum/maximum magnitude, variance, across the
+three datasets (Large, Marmousi3D, Salt).
+
+\begin{itemize}
+  \item Correlate these statistics with attributes derived from the input
+        velocity model (local impedance contrast, depth, distance to
+        reflectors, local wavelength), seeking which attributes are
+        predictive of where the dynamic range, and therefore the
+        tolerance to round-off error, is structurally lower.
+  \item From that correlation, build an \emph{a priori} precision-zoning
+        estimator, computable directly from the velocity model before any
+        time step is run. This estimator is complementary to the four
+        reactive criteria of Phase 3, which depend on the wavefield
+        computed during the simulation itself.
+  \item Use this characterization to validate, or refute, the physical
+        assumptions behind each of the four proposed criteria, before
+        investing in their implementation and fine-tuning in Phase 3.
+\end{itemize}
+
+\subsection{Phase 3 --- Precision-AMR: Criteria, Tagging, and Validation
+(M10--M20)}
+
+\textbf{Challenge:} unlike mesh-based AMR, where the characteristic
+artifact is a localized reflection at the coarse-fine interface, round-off
+noise induced by precision reduction propagates together with the wave
+itself, so tagging criteria cannot rely solely on local smoothness of the
+field, as classical refinement indicators do. They must anticipate where
+an error, once injected, will fail to reach the receivers or the FWI
+gradient before the simulation ends. A second, technological challenge
+compounds this: reduced precision and lossy compression, both already used
+separately in GPUZIP, may interact non-trivially when applied to the same
+block, and that interaction needs to be isolated before defining a joint
+error budget.
+
+\textbf{Method:} this is the core scientific phase, run at scale on Santos
+Dumont's H100 partition. Building on the characterization from Phase 2, we
+design, implement, and validate four candidate tagging criteria for
+spatial precision zoning:
+
+\begin{itemize}
+  \item \textbf{Boundary criterion:} tiles inside or adjacent to the
+        PML/absorbing layer are tagged for reduced precision by default,
+        since their contribution is already being damped.
+  \item \textbf{Energy criterion:} tiles are tagged by a threshold on
+        local wavefield energy density, so that regions of low amplitude
+        (before wavefront arrival, or after geometrical spreading has
+        attenuated the signal) tolerate lower precision.
+  \item \textbf{Sensitivity criterion (FWI):} tiles are tagged using the
+        magnitude of the local adjoint-sensitivity kernel, reusing the
+        gradient computation itself as the tagging signal, in direct
+        analogy to the adjoint-guided refinement of Davis and
+        LeVeque~\cite{davis2015adjoint} and to the Berger--Oliger
+        truncation-error estimator in classical AMR.
+  \item \textbf{Wavefront-trailing criterion:} a time-dependent band
+        immediately behind the propagating wavefront is tagged for
+        reduced precision, while the leading edge, where phase accuracy
+        governs the imaging condition, retains full precision.
+\end{itemize}
+
+For each criterion, we implement compensated (Kahan) summation in the
+low-precision tiles' time-stepping update to control round-off
+accumulation over the full simulation, following the mechanism identified
+by Gao and Harms~\cite{gao2023half}. We explicitly test for a
+``precision-interface'' artifact, analogous to coarse-fine interface
+reflections in mesh-based AMR, via residual analysis at the boundaries
+between tiles of differing precisions.
+
+To isolate the effects of mixed precision from the effects of lossy
+compression before unifying them into a single per-tile error budget, each
+candidate tagging region is evaluated under four conditions, always
+compared against the FP64 reference by PSNR, SSIM, and mean relative
+error, on both the raw wavefield and the final migrated image:
+
+\begin{enumerate}
+  \item full precision, no compression (control);
+  \item full precision, with differential compression (isolates the
+        compression effect);
+  \item reduced precision, no compression (isolates the precision
+        effect);
+  \item reduced precision, with differential compression (the condition
+        actually deployed in production).
+\end{enumerate}
+
+Comparing conditions (ii)+(iii) against (iv) indicates whether the two
+effects are approximately additive, whether one masks the other, or
+whether there is amplification through interaction. Only then does each
+tile jointly receive a floating-point format and a checkpoint compression
+policy (full snapshot versus compressed delta), as a single, jointly
+tuned error budget. This phase subsumes differential checkpointing, which
+becomes the storage mechanism for \pamr{}-tagged tiles rather than a
+separate deliverable.
+
+\subsection{Phase 4 --- Precision-AMR without Native FP64 (M19--M27)}
+
+\textbf{Challenge:} GPUs geared primarily toward AI, such as the RTX 5090,
+offer negligible native FP64 throughput. Emulating FP64 across the entire
+domain via the Ozaki scheme~\cite{uchino2025ozaki} is technically viable
+but expensive enough to make indiscriminate use impractical, which only
+reinforces the need to apply it selectively.
+
+\textbf{Method:} the tagging criteria validated in Phase 3 are applied on
+the RTX 5090. Per tile, the pipeline selects between native low-precision
+tensor-core execution, cuBLAS mixed-precision GEMM (FP32 compute with
+FP64 accumulation) or cuSOLVER iterative refinement for dense sub-kernels,
+and Ozaki-scheme FP64 emulation for tiles flagged as accuracy-critical.
+
+\begin{itemize}
+  \item This directly operationalizes the motivation for exploiting
+        AI-first GPUs that lack native FP64: expensive emulation is
+        concentrated only where \pamr{}'s criteria indicate it is needed.
+  \item We quantify the speedup/accuracy trade-off relative to a
+        uniform-Ozaki baseline (emulating FP64 everywhere) to determine
+        how much selective tiling actually saves.
+  \item All errors are bounded jointly (compression $\times$ precision
+        interaction, following the Phase 3 methodology) against the FP64
+        baseline using PSNR, SSIM, and mean relative error, across the
+        same three datasets and three checkpointing algorithms (Revolve,
+        zCut, Uniform) used throughout the project.
+\end{itemize}
+
+\subsection{Phase 5 --- Cross-Architecture Validation (AMD Instinct
+MI300A) (M26--M31)}
+
+\textbf{Challenge:} the tagging criteria are motivated by the physics of
+wave propagation and adjoint sensitivity, not by any particular vendor's
+arithmetic units. That portability, however, is a claim that needs to be
+tested, not merely assumed, especially because AMD offers no direct
+equivalent to the Ozaki scheme or to nvCOMP/Bitcomp.
+
+\textbf{Method:} with the dedicated time that a 36-month programme
+allows, we port the same tagging and tiling logic to Santos Dumont's AMD
+Instinct MI300A nodes via ROCm/HIP (rocBLAS, hipBLAS, and AMD's own
+reduced-precision matrix paths), without assuming feature parity with the
+CUDA-specific path.
+
+\begin{itemize}
+  \item We test whether the Phase 3 criteria and the precision
+        $\times$ compression factorial methodology hold on a CDNA3
+        architecture, re-running the same evaluation protocol used on
+        the NVIDIA GPUs.
+  \item We test whether the \emph{a priori} estimator built in Phase 2,
+        derived from the velocity model and architecture-independent,
+        transfers directly, without retuning, to the MI300A.
+  \item We compare the speedup/accuracy trade-off achieved on the MI300A
+        against the NVIDIA baselines, to characterize how much of the
+        gain is architecture-independent and how much is specific to the
+        CUDA/Ozaki/nvCOMP stack.
+\end{itemize}
+
+\subsection{Phase 6 --- Spectral Operators, Integration, and Release
+(M31--M36)}
+
+\textbf{Challenge:} consolidating the supporting techniques (differential
+checkpointing, mixed-precision GEMM, Ozaki-scheme emulation, spectral
+operators) and the Precision-AMR module into a single, coherent, reusable
+software artifact, the P-AMR library described in Expected Results,
+rather than leaving them as isolated prototypes from each phase.
+
+\textbf{Method:}
+
+\begin{itemize}
+  \item Benchmark cuFFT-based pseudo-spectral derivative operators as an
+        alternative update rule for selected, precision-tagged tiles, as
+        a secondary technique complementing the core \pamr{} contribution.
+  \item Integrate the Precision-AMR module, already as an independent
+        library, differential checkpointing, and mixed-precision paths
+        into a unified GPUZIP v3.0 release.
+  \item Multi-node scaling evaluation on Santos Dumont ($\leq$8 GPUs).
+  \item Final analysis, write-up, and submission, with Precision-AMR as
+        the central scientific claim and differential checkpointing,
+        mixed-precision linear algebra, and spectral operators presented
+        as supporting techniques.
+\end{itemize}
+
+\subsection{Computational Platforms}
+
+\paragraph{HPC SDK} (nvc++/nvfortran, CUDA-X math libraries, Nsight
+Systems/Compute). Experience: team uses CUDA and Nsight Systems routinely.
+Adoption: migrate the Awave-3D build from clang to nvc++ and validate
+numerical parity against existing baselines. Nsight Compute provides
+kernel-level roofline analysis, now applied per spatial tile, to identify
+which tiles are memory-bandwidth-bound versus compute-bound and to
+objectively scope where a lower-precision tile actually pays off.
+
+\paragraph{RTX 5090} (dedicated hardware, requested, 32\,GB GDDR7 plus a
+server with 64\,GB of RAM). This GPU is also based on the Blackwell
+architecture and shares with same-generation professional cards the same
+memory bandwidth (1,792\,GB/s) and the same 5th-generation tensor cores,
+with FP8/FP4 support and negligible native FP64 throughput. For a
+memory-bandwidth-bound finite-difference solver like ours, it is memory
+bandwidth, not raw CUDA-core count, that determines performance. This
+makes the RTX 5090 a representative development platform for \pamr{}, at
+a fraction of the cost of an equivalent professional card and within the
+per-item equipment ceiling set by FAPESP's Regular Research Grant rules
+for this type of request. The absence of fast native FP64 is not a new
+disadvantage: it is exactly the precision regime that \pamr{} already
+assumes and exploits, via Ozaki-scheme emulation and mixed-precision
+GEMM, so the scientific question this project answers, precisely which
+tiles need emulated FP64 and which do not, remains the same. Its 32\,GB
+of GDDR7 (without ECC) support kernel iteration and the tuning of tagging
+criteria on representative subsets of the domain; as dedicated,
+queue-free hardware, it enables fast iterative debugging that a shared
+batch system is not well suited for. FP64 ground truth and production
+validation continue to be generated on Santos Dumont, with ECC-protected
+memory.
+
+\paragraph{Santos Dumont} (LNCC/SINAPAD, Tier-0 national supercomputer,
+Petr\'opolis-RJ). Provides the large-scale validation environment. Its
+BullSequana X1000 partition includes 94 nodes with 4$\times$ NVIDIA Volta
+V100 GPUs each, matching the hardware used for the original GPUZIP
+baselines, plus a dedicated AI node with 8$\times$ V100 16GB over NVLink.
+Its newer BullSequana XH3000 partition adds 62 nodes with 4$\times$ NVIDIA
+Hopper H100 SXM 80GB over NVLink, 36 NVIDIA Grace-Hopper GH200 superchip
+nodes, and 18 nodes with 2$\times$ AMD Instinct MI300A APUs (CDNA3 GPU
+cores, 128\,GB HBM3 each). This heterogeneity lets us generate FP64 ground
+truth and run the full \pamr{} criteria sweep at scale on NVIDIA hardware,
+and separately test whether the tagging methodology and block-tiling
+approach generalize to a non-NVIDIA architecture.
+
+\paragraph{nvCOMP / Bitcomp} (GPU-side lossy compressor). Experience:
+integrated and validated in GPUZIP v2.0, where Bitcomp delivered the best
+accuracy-compression balance on V100. Adoption here: the storage mechanism
+for differential checkpointing, now indexed by the same tile identifiers
+used for precision tagging, so each tile carries a single, jointly-tuned
+precision-and-compression error budget.
+
+\paragraph{cuBLAS (mixed-precision extensions) and cuSOLVER (iterative
+refinement).} Both ship inside the HPC SDK. Experience: team has used
+BLAS/LAPACK routines in prior HPC work. Adoption: applied only within
+tiles that \pamr{} flags as containing dense sub-kernels needing accuracy
+beyond native low precision (FP32 compute with FP64 accumulation, and
+cuSOLVER iterative refinement).
+
+\paragraph{Ozaki-scheme FP64 emulation} via low-precision tensor cores.
+Adoption: reserved for the subset of tiles that \pamr{}'s sensitivity
+criteria mark as accuracy-critical (near the wavefront, high
+adjoint-sensitivity magnitude), rather than applied uniformly. This
+directly tests whether selective emulation is cheaper than emulating
+everywhere while preserving image fidelity. Recent work has demonstrated
+up to 2.3$\times$ speedup over native FP64 DGEMM on Blackwell
+GPUs~\cite{uchino2025ozaki}, measured on the professional RTX PRO 6000
+card; we expect comparable results on the RTX 5090, since both share the
+same tensor-core generation.
+
+\paragraph{cuFFT.} Experience: used in prior spectral operator work.
+Adoption: benchmarked as an alternative to FDM stencils for wavefield
+updates within selected, precision-tagged tiles, characterising the
+memory-bandwidth versus compute trade-off relative to the standard
+finite-difference path.
+
+\paragraph{AMD Instinct MI300A} (CDNA3, Santos Dumont, exploratory). As an
+additional validation activity, we assess how much of the \pamr{}
+framework, that is, the block/tile decomposition, the four tagging
+criteria, and the joint precision-compression error budget, transfers to
+AMD's ROCm/HIP ecosystem (rocBLAS, hipBLAS, and AMD's own
+reduced-precision matrix paths), without assuming feature parity with the
+CUDA-specific Ozaki-scheme emulation or nvCOMP/Bitcomp compression path.
+The goal is to determine whether Precision-AMR is a portable methodology
+or an NVIDIA-specific optimization.
 
 % ============================================================================
 % OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
@@ -237,6 +560,15 @@ lossy compression; checkpointing.
 % ============================================================================
 % END OF OLD BLOCK (Abstract)
 % ============================================================================
+
+% ============================================================================
+% OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
+% Content moved to the "Computational Platforms" subsection at the end of
+% the "Scientific and Technological Challenges..." section (after Phase 6),
+% since the FAPESP roteiro has no dedicated section for this.
+% Remove only after final approval of the restructured version.
+% ============================================================================
+\iffalse
 
 \section{Computational Platforms}
 
@@ -306,6 +638,20 @@ assuming feature parity with the CUDA-specific Ozaki-scheme emulation or
 nvCOMP/Bitcomp compression path. The goal is to determine whether Precision-AMR
 is a portable methodology or an NVIDIA-specific optimization.
 
+\fi
+% ============================================================================
+% END OF OLD BLOCK (Computational Platforms)
+% ============================================================================
+
+% ============================================================================
+% UNNECESSARY SECTION FOR THE APR --- kept commented, not a restructuring
+% "old block". "Dataset and Model" was required by a different FAPESP call
+% (not the APR roteiro) and has no equivalent in the APR's mandatory
+% structure. Kept here only for reference in case it is needed again; user
+% decision on 2026-09-04.
+% ============================================================================
+\iffalse
+
 \section{Dataset and Model}
 
 \begin{itemize}
@@ -321,6 +667,11 @@ is a portable methodology or an NVIDIA-specific optimization.
         Brazil; staged for upload to Santos Dumont's parallel file systems for
         large-scale runs.
 \end{itemize}
+
+\fi
+% ============================================================================
+% END OF UNNECESSARY SECTION (Dataset and Model)
+% ============================================================================
 
 % ============================================================================
 % OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
@@ -412,6 +763,16 @@ question directly, rather than merely claim it.
 % ============================================================================
 % END OF OLD BLOCK (Introduction)
 % ============================================================================
+
+% ============================================================================
+% OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
+% Content reorganized (with new Phase 2 for empirical characterization, a
+% dedicated Phase 5 for cross-architecture validation, and the timeline
+% extended to 36 months) in the new "Scientific and Technological
+% Challenges..." section above.
+% Remove only after final approval of the restructured version.
+% ============================================================================
+\iffalse
 
 \section{Methods}
 
@@ -510,6 +871,11 @@ accuracy-critical.
         techniques.
 \end{itemize}
 
+\fi
+% ============================================================================
+% END OF OLD BLOCK (Methods)
+% ============================================================================
+
 \section{Evaluation}
 
 All experiments span three datasets (Large, Marmousi3D, Salt), three
@@ -594,18 +960,25 @@ of these sources duplicates the RTX PRO 6000 request.
 
 \section{Project Support Details}
 
-We request one RTX PRO 6000 Blackwell GPU as dedicated local development
-hardware. Its abundant FP8/FP4 tensor-core throughput and negligible native FP64
-make it the scientifically relevant target for the selective-emulation study
-central to Phase 3: it forces the question of whether Precision-AMR's selective
-use of Ozaki-scheme emulation can match full-domain emulation at a fraction of
-the cost. As dedicated, queue-free hardware, it also supports the iterative
-day-to-day development that a shared batch system is not well suited for.
-Large-scale validation --- the \pamr{} criteria sweep across datasets and
-checkpointing algorithms, FP64 baseline generation, multi-GPU scaling, and the
-AMD MI300A portability test --- runs separately on the Santos Dumont
-supercomputer (LNCC/SINAPAD), accessed through LNCC's own allocation program and
-outside the scope of this request.
+We request a dedicated local server equipped with an NVIDIA RTX 5090 GPU
+(32\,GB GDDR7) and 64\,GB of RAM, with an estimated cost of up to
+R\$~55,000 in Brazil, within the per-item equipment ceiling set by
+FAPESP's Regular Research Grant rules. This GPU shares with same-generation
+professional Blackwell cards the same memory bandwidth (1,792\,GB/s) and
+the same 5th-generation tensor cores, which makes it representative for
+kernel development on a memory-bandwidth-bound solver like ours, at a
+fraction of the cost of an equivalent professional card. Its negligible
+native FP64 throughput makes it the scientifically relevant target for the
+selective-emulation study central to Phase 4: it forces the question of
+whether Precision-AMR's selective use of Ozaki-scheme emulation can match
+full-domain emulation at a fraction of the cost. As dedicated, queue-free
+hardware, it also supports the iterative day-to-day development that a
+shared batch system is not well suited for. Large-scale validation, that
+is, the \pamr{} criteria sweep across datasets and checkpointing
+algorithms, FP64 baseline generation, multi-GPU scaling, and the AMD
+MI300A portability test, runs separately on the Santos Dumont
+supercomputer (LNCC/SINAPAD), accessed through LNCC's own allocation
+program and outside the scope of this request.
 
 \subsection*{Resource Request}
 
@@ -616,8 +989,9 @@ outside the scope of this request.
 \endhead
 \bottomrule
 \endfoot
-Physical hardware & 1$\times$ RTX PRO 6000 Blackwell --- dedicated local
-development hardware, used throughout the project\\
+Physical hardware & 1$\times$ server with an NVIDIA RTX 5090 GPU (32\,GB
+GDDR7) and 64\,GB of RAM, dedicated local development hardware, used
+throughout the project (estimated cost: up to R\$~55,000)\\
 \end{longtable}
 
 Compute time on Santos Dumont is requested separately through LNCC's own project
