@@ -149,6 +149,41 @@ potencial para a área: um eixo de adaptividade numérica novo e portável entre
 fabricantes, e não apenas uma otimização pontual para uma única arquitetura
 de GPU.
 
+\section{Resultados Esperados}
+
+A principal contribuição deste projeto é o próprio
+método Precision-AMR (\pamr{}), que explora um novo eixo de adaptividade numérica
+que varia a precisão de ponto flutuante espacialmente, segundo critérios
+fisicamente motivados (proximidade à PML, densidade de energia do campo de
+onda, magnitude da sensibilidade adjunta e faixa de esteira da frente de
+onda), proposto e validado especificamente para solucionadores adjuntos de
+EDPs como RTM/FWI. Essa contribuição inclui a formulação dos quatro
+critérios de marcação, a caracterização do artefato de ``interface de
+precisão'', análogo às reflexões de interface grossa-fina do AMR clássico, e a demonstração de que os orçamentos de precisão e de compressão com
+perdas podem ser unificados em uma única meta de erro por bloco.
+
+Como contribuições secundárias, o projeto produzirá: (i) uma avaliação
+multi-arquitetura do uso de precisão mista guiado pelo P-AMR, comparando GPUs
+NVIDIA (V100, H100, GH200) e a APU AMD Instinct MI300A, caracterizando
+quanto do ganho de desempenho e do compromisso de precisão alcançados é
+independente de fabricante; e (ii) a implementação do P-AMR como uma
+\textbf{biblioteca independente}, com uma interface que permite sua
+integração a outras aplicações de simulação baseadas em EDPs, para além do
+escopo específico da RTM/FWI. Essa biblioteca poderá ser adotada
+isoladamente ou combinada ao GPUZIP, mesclando o zoneamento espacial de
+precisão do P-AMR com o checkpointing comprimido do GPUZIP em um único fluxo
+de trabalho, sem exigir que a aplicação hospedeira adote toda a pilha do
+GPUZIP apenas para se beneficiar do P-AMR. Ela será disponibilizada
+em código aberto, sob licença MIT, no GitHub.
+
+O resultado científico central será submetido a um evento ou periódico de
+alto impacto em computação de alto desempenho, por exemplo,
+Supercomputing (SC), IPDPS, Euro-Par ou SBAC-PAD entre os eventos, ou a
+IJHPCA ou um periódico do tipo \emph{Transactions} da IEEE ou da ACM entre
+os periódicos, acompanhado de um pacote público de reprodutibilidade
+(conjuntos de dados, perfis do Nsight, métricas de qualidade),
+disponibilizado via REDU da UNICAMP.
+
 % ============================================================================
 % BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
 % Remover apenas após aprovação final da versão reestruturada.
@@ -540,6 +575,16 @@ AMD MI300A do Santos Dumont e comparadas às linhas de base NVIDIA, para
 caracterizar quanto do ganho de desempenho e do compromisso de precisão
 alcançados independe da arquitetura.
 
+% ============================================================================
+% BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
+% O parágrafo "Resultados projetados" já foi incorporado à nova seção
+% "Resultados Esperados" (acima, logo após "Enunciado do Problema"). O
+% cronograma (tabela por mês/fase) será reaproveitado na futura seção
+% "Cronograma de Execução"; o parágrafo "Dependências" ainda não foi
+% realocado. Remover apenas após aprovação final da versão reestruturada.
+% ============================================================================
+\iffalse
+
 \section{Resultados Esperados}
 
 Cronograma (12 meses):
@@ -597,6 +642,11 @@ supercomputador Santos Dumont (LNCC/SINAPAD) ocorrem por meio do próprio
 programa de alocação computacional do LNCC (SINAPAD), independentemente desta
 solicitação. O apoio institucional existente financia pessoal; nenhuma dessas
 fontes duplica a solicitação da RTX PRO 6000.
+
+\fi
+% ============================================================================
+% FIM DO BLOCO ANTIGO (Resultados Esperados)
+% ============================================================================
 
 \section{Detalhes do Apoio ao Projeto}
 

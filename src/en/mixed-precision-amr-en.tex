@@ -144,6 +144,40 @@ contribution to the field: a numerical adaptivity axis that is new and
 portable across vendors, not merely a one-off optimization for a single GPU
 architecture.
 
+\section{Expected Results}
+
+The project's principal contribution is the Precision-AMR (\pamr{}) method
+itself, which explores a new axis of numerical adaptivity that varies
+floating-point precision spatially, according to physically motivated
+criteria (proximity to the PML, wavefield energy density, adjoint-sensitivity
+magnitude, and a wavefront-trailing band), proposed and validated
+specifically for adjoint PDE solvers such as RTM/FWI. This contribution
+includes the formulation of the four tagging criteria, the characterization
+of the ``precision-interface'' artifact, analogous to the coarse-fine
+interface reflections of classical AMR, and the demonstration that the
+precision and lossy-compression budgets can be unified into a single
+per-tile error target.
+
+As secondary contributions, the project will produce: (i) a
+multi-architecture evaluation of P-AMR-guided mixed-precision usage,
+comparing NVIDIA GPUs (V100, H100, GH200) and the AMD Instinct MI300A APU,
+characterizing how much of the achieved speedup and accuracy trade-off is
+vendor-independent; and (ii) the implementation of P-AMR as an
+\textbf{independent library}, with an interface that allows its integration
+into other PDE-based simulation applications, beyond the specific scope of
+RTM/FWI. This library may be adopted standalone or combined with GPUZIP,
+merging P-AMR's spatial precision zoning with GPUZIP's compressed
+checkpointing into a single workflow, without requiring the host application
+to adopt the entire GPUZIP stack just to benefit from P-AMR. It will be made
+available as open source, under the MIT license, on GitHub.
+
+The central scientific result will be submitted to a high-impact
+high-performance-computing event or journal, for example, Supercomputing
+(SC), IPDPS, Euro-Par, or SBAC-PAD among the events, or IJHPCA or a
+Transactions-type journal from IEEE or ACM among the journals, accompanied
+by a public reproducibility package (datasets, Nsight profiles, quality
+metrics), made available via UNICAMP's REDU.
+
 % ============================================================================
 % OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
 % Remove only after final approval of the restructured version.
@@ -491,6 +525,16 @@ computed on Santos Dumont's AMD MI300A partition and compared against the NVIDIA
 baselines, to characterise how much of the achieved speedup and accuracy
 trade-off is architecture-independent.
 
+% ============================================================================
+% OLD BLOCK (pre-FAPESP restructuring) --- kept for reference. The
+% "Projected outcomes" paragraph has already been incorporated into the new
+% "Expected Results" section above (right after "Problem Statement"). The
+% timeline (month/phase table) will be reused in the future "Execution
+% Timeline" section; the "Dependencies" paragraph has not yet been
+% relocated. Remove only after final approval of the restructured version.
+% ============================================================================
+\iffalse
+
 \section{Expected Results}
 
 Timeline (12 months):
@@ -542,6 +586,11 @@ another grant. Large-scale validation runs on the Santos Dumont supercomputer
 (LNCC/SINAPAD) through LNCC's own computational allocation program (SINAPAD),
 independent of this request. Existing institutional support funds personnel; none
 of these sources duplicates the RTX PRO 6000 request.
+
+\fi
+% ============================================================================
+% END OF OLD BLOCK (Expected Results)
+% ============================================================================
 
 \section{Project Support Details}
 
