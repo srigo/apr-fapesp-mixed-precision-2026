@@ -49,6 +49,112 @@ supercomputador Santos Dumont (LNCC)}
 Instituto de Computação, Universidade Estadual de Campinas
 \end{flushleft}
 
+\section{Enunciado do Problema}
+
+O hardware de GPU vem se voltando cada vez mais para a baixa precisão em prol
+de cargas de trabalho de IA (FP8/BF16), expondo novas hierarquias de memória,
+tensor cores e bibliotecas matemáticas de precisão mista. Ao mesmo tempo,
+simulações científicas baseadas em equações diferenciais parciais (EDPs)
+continuam a exigir precisão FP64/FP32 para permanecer confiáveis. A Migração
+Reversa no Tempo (Reverse Time Migration, RTM), método de imageamento sísmico
+que resolve a equação da onda por diferenças finitas ao longo de milhares de
+passos de tempo, é um exemplo canônico dessa tensão: geofísicos usam a imagem
+migrada para orientar decisões de perfuração de alto custo, de modo que a
+fidelidade numérica é essencial. A RTM também é intensiva em memória,
+exigindo centenas de gigabytes de estado do campo de onda e dependendo de
+checkpointing para trocar memória por recomputação em sua estrutura adjunta
+de propagação direta/reversa.
+
+Nosso trabalho anterior atacou o principal gargalo dessa estrutura, isto é, a
+transferência de checkpoints entre host e GPU via PCIe, com a combinação do conceito de prefetching com a compressão de dados.
+Essa ideia foi materializada como a biblioteca GPUZIP~\cite{maltempi2025checkpointing,gpuzip}, que comprime os checkpoints
+na GPU e os pré-busca de forma proativa, reduzindo o volume de transferência
+host--GPU em até 80$\times$ e alcançando ganhos de desempenho ponta a ponta
+de até 5,1$\times$ na V100, preservando a qualidade da imagem (SSIM
+$\approx$ 1, erro relativo próximo de zero). Separadamente, já se demonstrou
+que a aritmética de precisão reduzida é viável para modelagem sísmica, RTM e
+FWI: Fabien-Ouellet~\cite{fabienouellet2020half} constatou que uma
+implementação estável em meia precisão (FP16) da equação de onda elástica é
+alcançável por meio de escalonamento (\emph{scaling}) apropriado, que o erro
+resultante no sismograma é uma fração desprezível da energia sísmica total e
+majoritariamente incoerente com as fases sísmicas, e que esse ruído não
+prejudica a qualidade das imagens de FWI ou RTM. Entretanto, essa redução é
+aplicada de forma uniforme em todo o domínio computacional. Gao e
+Harms~\cite{gao2023half} identificaram um risco específico dessa abordagem:
+a integração no tempo em meia precisão de forma ingênua acumula erro de
+arredondamento por meio de uma somatória recursiva disfarçada na regra de
+atualização, degradando a qualidade da solução, sendo a somatória compensada
+(de Kahan) um remédio eficaz.
+
+Ao mesmo tempo, o refinamento adaptativo de malha (Adaptive Mesh Refinement,
+AMR) tem sido explorado na simulação de ondas sísmicas e, mais recentemente,
+explicitamente em fluxos de trabalho de FWI e RTM, para evitar o desperdício
+inerente a uma malha uniforme: os erros de dispersão e dissipação exigem
+espaçamento de malha proporcional ao menor comprimento de onda, de modo que
+uma malha uniforme é forçada a usar o espaçamento mais fino em toda parte,
+mesmo onde o campo de velocidade local toleraria um espaçamento bem mais
+grosseiro. O AMR resolve isso refinando o $\Delta x$ localmente. Não existe,
+porém, esquema comparável e fisicamente motivado para a precisão de ponto
+flutuante: os trabalhos existentes de precisão mista em imageamento sísmico
+são globais e uniformes (como acima), ou adaptativos apenas no nível de uma
+operação individual de álgebra linear (GEMM de precisão mista, refinamento
+iterativo, emulação pelo esquema de Ozaki), sem estar vinculados a uma
+decomposição espacial do próprio campo de onda. Nenhum desses trabalhos varia
+a precisão de ponto flutuante segundo critérios espaciais fisicamente
+motivados. Esse é um terceiro eixo de adaptabilidade que permanece, portanto,
+praticamente inexplorado.
+
+Este projeto propõe preencher essa lacuna com o Precision-AMR (\pamr{}): um
+esquema espacialmente estruturado em blocos, análogo de precisão adaptativa
+ao AMR, que mantém fixa a resolução da malha e, em vez disso, varia o formato
+de ponto flutuante atribuído a cada bloco (\emph{tile}) do domínio, com base
+em critérios de tolerância a erro fisicamente motivados (proximidade a bordas
+absorventes, densidade de energia do campo de onda, magnitude da
+sensibilidade adjunta, e uma faixa dependente do tempo que segue a frente de
+onda em propagação) que preveem se o erro de arredondamento introduzido
+naquele bloco pode alcançar a condição de imageamento ou o gradiente do FWI.
+Trata-se de um problema estruturalmente diferente do AMR baseado em malha. No
+AMR, o artefato característico é uma reflexão localizada na interface
+grossa-fina da malha, porque o refinamento altera a própria discretização.
+No \pamr{}, nenhuma fronteira de discretização é introduzida; em vez disso,
+um nível espacialmente variável de ruído de arredondamento é injetado em uma
+EDP hiperbólica, e esse ruído se propaga junto com a onda. Os critérios de
+marcação (\emph{tagging}), portanto, não podem se basear apenas na suavidade
+local, como fazem os indicadores de refinamento do AMR; eles precisam, em vez
+disso, aproximar onde um erro, uma vez injetado, decairá, será absorvido ou
+deixará de alcançar os receptores ou o kernel de sensibilidade antes do fim
+da simulação, e controlar o acúmulo de arredondamento ao longo dos milhares
+de passos de tempo típicos de RTM/FWI.
+
+Como a RTM/FWI já exige uma decomposição do domínio em blocos/\emph{tiles}
+para o checkpointing, o \pamr{} reaproveita essa mesma decomposição como
+granularidade de marcação, unificando o orçamento de precisão e o orçamento
+de compressão com perdas do checkpointing diferencial em uma única meta de
+precisão por bloco, conjuntamente ajustada. O GEMM de precisão mista, o
+refinamento iterativo do cuSOLVER e a emulação de FP64 pelo esquema de Ozaki
+continuam essenciais como técnicas de suporte, mas passam a ser aplicados
+seletivamente, apenas onde os critérios do \pamr{} indicam necessidade ---
+a forma natural de explorar GPUs orientadas primariamente para IA, como a RTX
+PRO 6000 Blackwell, que oferecem vazão nativa de FP64 desprezível.
+
+Como os critérios de marcação são motivados pela física da propagação de
+ondas e pela sensibilidade adjunta, e não pelas unidades aritméticas de um
+fabricante específico, tratamos sua portabilidade entre arquiteturas como uma
+questão explícita, e não como uma suposição. Nosso grupo de pesquisa tem acesso ao supercomputador
+Santos Dumont (LNCC/SINAPAD), que inclui aceleradores AMD
+Instinct MI300A ao lado de diversas gerações NVIDIA (Volta V100, Hopper H100,
+Grace-Hopper GH200). Isso nos permite testar essa questão diretamente, em vez
+de apenas afirmá-la, e é o que confere ao Precision-AMR sua contribuição
+potencial para a área: um eixo de adaptividade numérica novo e portável entre
+fabricantes, e não apenas uma otimização pontual para uma única arquitetura
+de GPU.
+
+% ============================================================================
+% BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
+% Remover apenas após aprovação final da versão reestruturada.
+% ============================================================================
+\iffalse
+
 \section*{Resumo}
 
 Simulações científicas como a Migração Reversa no Tempo (Reverse Time
@@ -105,6 +211,11 @@ uma publicação revisada por pares.
 computação de precisão mista; aritmética de ponto flutuante; solucionadores
 adjuntos de EDPs; adaptividade estruturada em blocos; portabilidade entre
 arquiteturas; computação em GPU; compressão com perdas; checkpointing.
+
+\fi
+% ============================================================================
+% FIM DO BLOCO ANTIGO (Resumo)
+% ============================================================================
 
 \section{Plataformas Computacionais}
 
@@ -201,6 +312,13 @@ otimização específica da NVIDIA.
         paralelos do Santos Dumont para as execuções em larga escala.
 \end{itemize}
 
+% ============================================================================
+% BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
+% Conteúdo já incorporado à seção "Enunciado do Problema" acima.
+% Remover apenas após aprovação final da versão reestruturada.
+% ============================================================================
+\iffalse
+
 \section{Introdução}
 
 O hardware vem se voltando para a baixa precisão em prol da IA, mas a
@@ -289,6 +407,11 @@ e não como uma suposição. O acesso ao supercomputador Santos Dumont --- cujas
 partições incluem aceleradores AMD Instinct MI300A ao lado de diversas gerações
 NVIDIA --- nos permite testar essa questão diretamente, em vez de apenas
 afirmá-la.
+
+\fi
+% ============================================================================
+% FIM DO BLOCO ANTIGO (Introdução)
+% ============================================================================
 
 \section{Métodos}
 

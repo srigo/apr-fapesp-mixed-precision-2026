@@ -49,6 +49,107 @@ Candidate), Institute of Computing, Universidade Estadual de Campinas\\
 Institute of Computing, Universidade Estadual de Campinas
 \end{flushleft}
 
+\section{Problem Statement}
+
+GPU hardware is increasingly shifting toward low precision in favor of AI
+workloads (FP8/BF16), exposing new memory hierarchies, tensor cores, and
+mixed-precision math libraries. At the same time, scientific simulations
+based on partial differential equations (PDEs) continue to require FP64/FP32
+precision to remain trustworthy. Reverse Time Migration (RTM), a seismic
+imaging method that solves the wave equation by finite differences over
+thousands of time steps, is a canonical example of this tension:
+geophysicists use the migrated image to guide expensive drilling decisions,
+so numerical fidelity is essential. RTM is also memory-intensive, requiring
+hundreds of gigabytes of wavefield state and relying on checkpointing to
+trade memory against recomputation in its forward/backward adjoint
+structure.
+
+Our prior work tackled this structure's main bottleneck, namely host--GPU
+checkpoint transfer over PCIe, by combining the concept of prefetching with
+data compression. This idea was materialized as the GPUZIP
+library~\cite{maltempi2025checkpointing,gpuzip}, which compresses checkpoints
+on the GPU and prefetches them proactively, reducing host--GPU transfer
+volume by up to 80$\times$ and achieving end-to-end speedups of up to
+5.1$\times$ on V100, while preserving image quality (SSIM $\approx$ 1,
+near-zero relative error). Separately, reduced-precision arithmetic has
+already been shown to be viable for seismic modeling, RTM, and FWI:
+Fabien-Ouellet~\cite{fabienouellet2020half} found that a stable
+half-precision (FP16) implementation of the elastic wave equation is
+achievable through appropriate scaling, that the resulting seismogram error
+is a negligible fraction of total seismic energy and largely incoherent with
+seismic phases, and that this noise does not adversely affect FWI or RTM
+image quality. However, that reduction is applied uniformly across the
+entire computational domain. Gao and Harms~\cite{gao2023half} identified a
+specific hazard of that approach: naive half-precision time stepping
+accumulates round-off error through a disguised recursive summation in the
+update rule, degrading solution quality, with compensated (Kahan) summation
+as an effective remedy.
+
+At the same time, adaptive mesh refinement (AMR) has been explored for
+seismic wave simulation and, more recently, explicitly for FWI and RTM
+workflows, to avoid the waste inherent in a uniform grid: dispersion and
+dissipation errors require grid spacing proportional to the shortest
+wavelength, so a uniform mesh is forced to use the finest spacing
+everywhere, even where the local velocity field would tolerate a much
+coarser one. AMR addresses this by refining $\Delta x$ locally. No
+comparable, physically motivated scheme exists for floating-point precision,
+however: existing mixed-precision work in seismic imaging is either global
+and uniform (as above), or adaptive only at the level of an individual
+linear-algebra operation (mixed-precision GEMM, iterative refinement,
+Ozaki-scheme emulation), not tied to a spatial decomposition of the
+wavefield itself. None of this prior work varies floating-point precision
+according to physically motivated spatial criteria. This is therefore a
+third axis of adaptivity that remains largely unexplored.
+
+This project proposes to close that gap with Precision-AMR (\pamr{}): a
+spatially block-structured scheme, an adaptive-precision analogue of AMR,
+that keeps mesh resolution fixed and instead varies the floating-point
+format assigned to each block (tile) of the domain, based on physically
+motivated error-tolerance criteria (proximity to absorbing boundaries,
+wavefield energy density, adjoint-sensitivity magnitude, and a
+time-dependent band trailing the propagating wavefront) that predict whether
+the round-off error introduced in that block can reach the imaging
+condition or the FWI gradient. This is a structurally different problem
+from mesh-based AMR. In AMR, the characteristic artifact is a localized
+reflection at the coarse-fine grid interface, because refinement changes
+the discretization itself. In \pamr{}, no discretization boundary is
+introduced; instead, a spatially varying level of round-off noise is
+injected into a hyperbolic PDE, and that noise propagates together with the
+wave. Tagging criteria therefore cannot rely solely on local smoothness, as
+AMR refinement indicators do; they must instead approximate where an error,
+once injected, will decay, be absorbed, or otherwise fail to reach the
+receivers or the sensitivity kernel before the simulation ends, and control
+round-off accumulation over the thousands of time steps typical of RTM/FWI.
+
+Because RTM/FWI already require a block/tile decomposition of the domain
+for checkpointing, \pamr{} reuses that same decomposition as its tagging
+granularity, unifying the precision budget and the lossy-compression budget
+of differential checkpointing into a single, jointly tuned per-tile accuracy
+target. Mixed-precision GEMM, cuSOLVER iterative refinement, and
+Ozaki-scheme FP64 emulation remain essential as supporting techniques, but
+are now applied selectively, only where \pamr{}'s criteria indicate they are
+needed --- the natural way to exploit GPUs geared primarily toward AI, such
+as the RTX PRO 6000 Blackwell, which offer negligible native FP64
+throughput.
+
+Because the tagging criteria are motivated by the physics of wave
+propagation and adjoint sensitivity, rather than by any particular vendor's
+arithmetic units, we treat their portability across architectures as an
+explicit question, not an assumption. Our research group has access to the
+Santos Dumont supercomputer (LNCC/SINAPAD), which includes AMD Instinct
+MI300A accelerators alongside several NVIDIA generations (Volta V100, Hopper
+H100, Grace-Hopper GH200). This lets us test that question directly, rather
+than merely assert it, and it is what gives Precision-AMR its potential
+contribution to the field: a numerical adaptivity axis that is new and
+portable across vendors, not merely a one-off optimization for a single GPU
+architecture.
+
+% ============================================================================
+% OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
+% Remove only after final approval of the restructured version.
+% ============================================================================
+\iffalse
+
 \section*{Abstract}
 
 Scientific simulations such as Reverse Time Migration (RTM) solve partial
@@ -97,6 +198,11 @@ peer-reviewed publication.
 mixed-precision computing; floating-point arithmetic; adjoint PDE solvers;
 block-structured adaptivity; cross-architecture portability; GPU computing;
 lossy compression; checkpointing.
+
+\fi
+% ============================================================================
+% END OF OLD BLOCK (Abstract)
+% ============================================================================
 
 \section{Computational Platforms}
 
@@ -182,6 +288,13 @@ is a portable methodology or an NVIDIA-specific optimization.
         large-scale runs.
 \end{itemize}
 
+% ============================================================================
+% OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
+% Content already incorporated into the "Problem Statement" section above.
+% Remove only after final approval of the restructured version.
+% ============================================================================
+\iffalse
+
 \section{Introduction}
 
 Hardware is trending toward low precision for AI, but PDE-based scientific
@@ -260,6 +373,11 @@ treat their portability as an explicit question rather than an assumption. Acces
 to the Santos Dumont supercomputer --- whose partitions include AMD Instinct
 MI300A accelerators alongside several NVIDIA generations --- lets us test that
 question directly, rather than merely claim it.
+
+\fi
+% ============================================================================
+% END OF OLD BLOCK (Introduction)
+% ============================================================================
 
 \section{Methods}
 
