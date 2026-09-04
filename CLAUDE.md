@@ -18,6 +18,29 @@ Cada versão tem seu próprio arquivo `.bib` (`mixed-precision-amr-pt.bib` /
 `mixed-precision-amr-en.bib`) com as mesmas referências; apenas os campos
 `note`/`howpublished` variam de idioma.
 
+## Backups congelados — não alterar
+
+O usuário criou cópias de backup do estado da proposta anterior à
+reestruturação para o roteiro FAPESP (a formatação de fonte/espaçamento/
+margens já havia sido aplicada nesse estado):
+
+- [src/pt/precision-amr-backup-pt.tex](src/pt/precision-amr-backup-pt.tex)
+- [src/en/precision-amr-backup-en.tex](src/en/precision-amr-backup-en.tex)
+
+**Esses dois arquivos são congelados e não devem ser editados, traduzidos,
+recompilados ou apagados daqui em diante**, por nenhum motivo — nem para
+manter equivalência com as versões principais, nem em correções mecânicas.
+Eles existem apenas como referência histórica da estrutura de seções
+anterior (Abstract / Computational Platforms / Dataset and Model /
+Introduction / Methods / Evaluation / Expected Results / Project Support
+Details / Resource Request), para consulta caso seja preciso comparar ou
+recuperar conteúdo durante a reestruturação. Ficam fora do fluxo de
+equivalência `pt`↔`en`, fora do ciclo de aprovação, e fora dos comandos de
+build/limpeza descritos em "Compilação" — não têm `.bib` próprio nem
+precisam compilar isoladamente. Se o usuário pedir alguma mudança que
+tocaria nesses arquivos, confirmar antes de prosseguir, já que a instrução
+é para mantê-los intocados.
+
 ## Destino da proposta: Auxílio à Pesquisa Regular (APR) da FAPESP
 
 Esta proposta será submetida como um pedido de **Auxílio à Pesquisa Regular
