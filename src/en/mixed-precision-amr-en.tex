@@ -541,6 +541,92 @@ HPDR~\cite{chen2025hpdr} in Phase 5. The goal is to determine whether
 Precision-AMR is a portable methodology or an NVIDIA-specific
 optimization.
 
+\section{Execution Timeline}
+
+The project runs for 36 months, organized in the six phases described in
+the previous section. Completion is planned for month 36, with paper
+submission and the GPUZIP v3.0 release. Each phase ends with a verifiable
+deliverable that serves as a progress milestone; the v3.0-alpha release at
+the end of Phase 3 (month 20) is the main intermediate milestone.
+
+\begin{longtable}{@{}p{0.07\textwidth}p{0.08\textwidth}p{0.44\textwidth}p{0.30\textwidth}@{}}
+\toprule
+\textbf{Phase} & \textbf{Months} & \textbf{Main activities} &
+\textbf{Deliverable at the end of the phase}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Phase} & \textbf{Months} & \textbf{Main activities} &
+\textbf{Deliverable at the end of the phase}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & M1--M4 & Port Awave-3D and GPUZIP to the HPC SDK (nvc++); re-integrate
+nvCOMP/Bitcomp; reproduce the V100 baselines on Santos Dumont; establish
+the block/\emph{tile} decomposition with a per-block precision tag;
+per-block \emph{roofline} profiling (Nsight Compute) on the RTX 5090 and
+Santos Dumont. & GPUZIP/Awave-3D ported and validated under the HPC SDK,
+with numerical parity confirmed against the V100 baselines and the block
+decomposition extended to carry precision \emph{tags}; per-block
+\emph{roofline} profiling report.\\
+\addlinespace
+2 & M4--M10 & Instrument the solver to record FP dynamic-range statistics
+(exponent histogram, minimum/maximum magnitude, variance) per block and
+per time step from FP64 reference runs on the six datasets; correlate with
+velocity-model attributes; build the \emph{a priori} precision-zoning
+estimator; validate or refute the physical assumptions of the four
+criteria. & FP dynamic-range characterization database (space-time, six
+datasets) and \emph{a priori} precision-zoning estimator derived from the
+velocity model, with a report on which model attributes are predictive and
+which of the four criteria's assumptions hold empirically.\\
+\addlinespace
+3 & M10--M20 & Design, implement, and validate the four tagging criteria
+(boundary/PML, energy, adjoint sensitivity, wavefront-trailing) informed
+by Phase 2; compensated (Kahan) summation in the low-precision tiles;
+precision-interface artifact testing; precision $\times$ compression
+factorial study (four conditions) to define the unified per-tile error
+budget. & Precision-AMR module with the four criteria implemented and
+validated (PSNR, SSIM, and mean relative error vs. FP64 on the wavefield
+and the migrated image), documented precision $\times$ compression
+factorial methodology, and differential checkpointing integrated as the
+storage mechanism for tagged tiles; open-source GPUZIP v3.0-alpha release
+and reproducibility package (REDU).\\
+\addlinespace
+4 & M19--M27 & Apply the validated criteria on the RTX 5090; per-tile
+\emph{pipeline} selecting between native tensor cores, mixed-precision GEMM
+(cuBLAS), iterative refinement (cuSOLVER), and Ozaki-scheme FP64 emulation
+in accuracy-critical tiles; quantify the performance $\times$ accuracy
+trade-off against the uniform-Ozaki baseline; bound errors jointly
+(compression $\times$ precision) across the six datasets and three
+checkpointing algorithms. & Operational Precision-AMR \emph{pipeline} on
+hardware without native FP64, with the selective-emulation gain quantified
+against the uniform-Ozaki baseline and errors bounded vs. FP64 across the
+six datasets.\\
+\addlinespace
+5 & M26--M31 & Incorporate into GPUZIP a compression library with native
+AMD support (choice between hipCOMP-core, HPDR with MGARD/ZFP, or another,
+decided at the start of the phase); port the tagging and \emph{tiling}
+logic to the AMD Instinct MI300A nodes via ROCm/HIP; re-run the evaluation
+protocol (criteria and precision $\times$ compression factorial) with the
+AMD compressor; test direct transfer of the Phase 2 \emph{a priori}
+estimator; compare performance $\times$ accuracy against the NVIDIA
+baselines. & GPUZIP with a working AMD compression path (CDNA3) and a
+Precision-AMR portability report for the MI300A, characterizing how much
+of the gain is architecture-independent and how much is specific to the
+CUDA/Ozaki/nvCOMP stack.\\
+\addlinespace
+6 & M31--M36 & Benchmark cuFFT-based pseudo-spectral operators as an
+alternative update rule in tagged tiles; integrate the Precision-AMR
+module (as an independent library), differential checkpointing, and
+mixed-precision paths into a unified GPUZIP v3.0 release; multi-node
+scaling evaluation ($\leq$8 GPUs) on Santos Dumont; final analysis,
+write-up, and submission. & GPUZIP v3.0 release (MIT license, GitHub) with
+the Precision-AMR library, the cuFFT operator \emph{benchmark}, and the
+multi-node scaling evaluation; submitted paper and final public
+reproducibility package (REDU).\\
+\end{longtable}
+
 % ============================================================================
 % OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
 % Remove only after final approval of the restructured version.

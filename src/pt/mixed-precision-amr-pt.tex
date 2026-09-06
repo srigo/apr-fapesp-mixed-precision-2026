@@ -571,6 +571,94 @@ HPDR~\cite{chen2025hpdr} na Fase 5. O objetivo é determinar se o
 Precision-AMR é uma metodologia portável ou uma otimização específica da
 NVIDIA.
 
+\section{Cronograma de Execução}
+
+O projeto tem duração de 36 meses, organizado nas seis fases descritas na
+seção anterior. A conclusão está prevista para o mês 36, com a submissão do
+artigo e o lançamento do GPUZIP v3.0. Cada fase encerra com um entregável
+verificável, que funciona como marco de progresso; o lançamento
+v3.0-alpha ao final da Fase 3 (mês 20) é o marco intermediário principal.
+
+\begin{longtable}{@{}p{0.07\textwidth}p{0.08\textwidth}p{0.44\textwidth}p{0.30\textwidth}@{}}
+\toprule
+\textbf{Fase} & \textbf{Meses} & \textbf{Atividades principais} &
+\textbf{Entregável ao final da fase}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Fase} & \textbf{Meses} & \textbf{Atividades principais} &
+\textbf{Entregável ao final da fase}\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & M1--M4 & Portar Awave-3D e GPUZIP para o HPC SDK (nvc++); reintegrar
+nvCOMP/Bitcomp; reproduzir as linhas de base V100 no Santos Dumont;
+estabelecer a decomposição em blocos/\emph{tiles} com marca de precisão por
+bloco; perfilagem \emph{roofline} por bloco (Nsight Compute) na RTX 5090 e
+no Santos Dumont. & GPUZIP/Awave-3D portado e validado sob o HPC SDK, com
+paridade numérica confirmada contra as linhas de base V100 e a decomposição
+em blocos estendida para carregar \emph{tags} de precisão; relatório de
+perfilagem \emph{roofline} por bloco.\\
+\addlinespace
+2 & M4--M10 & Instrumentar o solucionador para registrar estatísticas do
+\emph{range} dinâmico de FP (histograma de expoentes, magnitude
+mínima/máxima, variância) por bloco e por passo de tempo em execuções FP64
+de referência nos seis conjuntos de dados; correlacionar com atributos do
+modelo de velocidade; construir o estimador \emph{a priori} de zoneamento
+de precisão; validar ou refutar as premissas físicas dos quatro critérios.
+& Base de caracterização do \emph{range} de FP (espaço-tempo, seis
+conjuntos de dados) e estimador \emph{a priori} de zoneamento de precisão
+derivado do modelo de velocidade, com relatório de quais atributos do
+modelo são preditivos e quais premissas dos quatro critérios se sustentam
+empiricamente.\\
+\addlinespace
+3 & M10--M20 & Projetar, implementar e validar os quatro critérios de
+marcação (borda/PML, energia, sensibilidade adjunta, esteira da frente de
+onda) informados pela Fase 2; somatória compensada (de Kahan) nos blocos de
+baixa precisão; teste do artefato de interface de precisão; estudo fatorial
+precisão $\times$ compressão (quatro condições) para definir o orçamento de
+erro por bloco unificado. & Módulo Precision-AMR com os quatro critérios
+implementados e validados (PSNR, SSIM e erro relativo vs. FP64 no campo de
+onda e na imagem migrada), metodologia fatorial precisão $\times$
+compressão documentada e checkpointing diferencial integrado como
+mecanismo de armazenamento dos blocos marcados; lançamento de código aberto
+do GPUZIP v3.0-alpha e pacote de reprodutibilidade (REDU).\\
+\addlinespace
+4 & M19--M27 & Aplicar os critérios validados na RTX 5090; \emph{pipeline}
+por bloco selecionando entre tensor cores nativos, GEMM de precisão mista
+(cuBLAS), refinamento iterativo (cuSOLVER) e emulação de FP64 pelo esquema
+de Ozaki nos blocos críticos; quantificar o compromisso desempenho $\times$
+precisão contra a linha de base Ozaki uniforme; delimitar erros
+conjuntamente (compressão $\times$ precisão) nos seis conjuntos de dados e
+três algoritmos de checkpointing. & \emph{Pipeline} Precision-AMR
+operacional em hardware sem FP64 nativo, com o ganho da emulação seletiva
+quantificado contra a linha de base Ozaki uniforme e os erros delimitados
+vs. FP64 nos seis conjuntos de dados.\\
+\addlinespace
+5 & M26--M31 & Incorporar ao GPUZIP uma biblioteca de compressão com
+suporte nativo a AMD (escolha entre hipCOMP-core, HPDR com MGARD/ZFP ou
+outra, definida no início da fase); portar a lógica de marcação e
+\emph{tiling} para os nós AMD Instinct MI300A via ROCm/HIP; reexecutar o
+protocolo de avaliação (critérios e fatorial precisão $\times$ compressão)
+com o compressor AMD; testar a transferência direta do estimador \emph{a
+priori} da Fase 2; comparar desempenho $\times$ precisão contra as linhas
+de base NVIDIA. & GPUZIP com caminho de compressão AMD funcional (CDNA3) e
+relatório de portabilidade do Precision-AMR para o MI300A, caracterizando
+quanto do ganho é arquitetura-independente e quanto é específico da pilha
+CUDA/Ozaki/nvCOMP.\\
+\addlinespace
+6 & M31--M36 & Avaliar operadores pseudo-espectrais baseados em cuFFT como
+regra de atualização alternativa em blocos marcados; integrar o módulo
+Precision-AMR (como biblioteca independente), o checkpointing diferencial e
+os caminhos de precisão mista em um lançamento unificado do GPUZIP v3.0;
+avaliação de escalabilidade multi-nó ($\leq$8 GPUs) no Santos Dumont;
+análise final, redação e submissão. & Lançamento do GPUZIP v3.0 (licença
+MIT, GitHub) com a biblioteca Precision-AMR, o \emph{benchmark} de
+operadores cuFFT e a avaliação de escalabilidade multi-nó; artigo submetido
+e pacote público de reprodutibilidade final (REDU).\\
+\end{longtable}
+
 % ============================================================================
 % BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
 % Remover apenas após aprovação final da versão reestruturada.
