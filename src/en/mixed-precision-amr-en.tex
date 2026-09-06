@@ -242,7 +242,7 @@ numerical behavior.
 \textbf{Method:} instrument the solver to record, from FP64 reference
 runs, dynamic-range statistics of the wavefield per block and per time
 step: exponent histogram, minimum/maximum magnitude, variance, across the
-three datasets (Large, Marmousi3D, Salt).
+six datasets described in the Evaluation section.
 
 \begin{itemize}
   \item Correlate these statistics with attributes derived from the input
@@ -357,7 +357,7 @@ and Ozaki-scheme FP64 emulation for tiles flagged as accuracy-critical.
   \item All errors are bounded jointly (compression $\times$ precision
         interaction, following the Phase 3 methodology) against the FP64
         baseline using PSNR, SSIM, and mean relative error, across the
-        same three datasets and three checkpointing algorithms (Revolve,
+        same six datasets and three checkpointing algorithms (Revolve,
         zCut, Uniform) used throughout the project.
 \end{itemize}
 
@@ -367,20 +367,54 @@ MI300A) (M26--M31)}
 \textbf{Challenge:} the tagging criteria are motivated by the physics of
 wave propagation and adjoint sensitivity, not by any particular vendor's
 arithmetic units. That portability, however, is a claim that needs to be
-tested, not merely assumed, especially because AMD offers no direct
-equivalent to the Ozaki scheme or to nvCOMP/Bitcomp.
+tested, not merely assumed. The concrete obstacle is the compression
+stack: GPUZIP today compresses checkpoints with Bitcomp, which is
+NVIDIA-proprietary and has no HIP port, so there is no checkpoint
+compression support on AMD GPUs. Generic \emph{lossless} compression (LZ4,
+Snappy, Cascaded) does not solve the problem: Künas et
+al.~\cite{kunas2026amdcompression} ported these algorithms from CUDA to
+HIP and measured, on AMD CDNA and RDNA GPUs (including the MI300X, of the
+same CDNA3 family as the MI300A), a compression ratio of only 1.03 to
+1.04$\times$ for floating-point seismic data, regardless of architecture.
+This is why GPUZIP uses bounded-error lossy compression, and it is this
+component that must be rebuilt for AMD.
 
-\textbf{Method:} with the dedicated time that a 36-month programme
-allows, we port the same tagging and tiling logic to Santos Dumont's AMD
-Instinct MI300A nodes via ROCm/HIP (rocBLAS, hipBLAS, and AMD's own
-reduced-precision matrix paths), without assuming feature parity with the
-CUDA-specific path.
+\textbf{Method:} Phase 5 begins by incorporating into GPUZIP a compression
+library with native AMD support, replacing the Bitcomp/nvCOMP path on the
+CDNA3 architecture. The options under consideration are:
 
 \begin{itemize}
-  \item We test whether the Phase 3 criteria and the precision
-        $\times$ compression factorial methodology hold on a CDNA3
-        architecture, re-running the same evaluation protocol used on
-        the NVIDIA GPUs.
+  \item \textbf{hipCOMP-core}~\cite{hipcompcore}: a HIP port of the same
+        algorithms as nvCOMP (LZ4, Snappy, Cascaded), with HIP/AMD and
+        HIP/CUDA backends. It is the direct analogue of nvCOMP, but still
+        \emph{early-access} and not optimized for AMD GPUs, and it covers
+        only the \emph{lossless} case.
+  \item \textbf{HPDR}~\cite{chen2025hpdr}: a portable framework with
+        native adapters for OpenMP, CUDA, and HIP, implementing pipelines
+        of MGARD (multilevel \emph{lossy} compression with error bounded
+        in quantities of interest), ZFP (fixed-rate compression for
+        multidimensional arrays), and Huffman. It was evaluated on up to
+        1,024 nodes of Frontier (AMD Instinct MI250X GPUs), reaching data
+        reduction throughput of up to 103\,TB/s. It is the most mature
+        functional equivalent of Bitcomp on Instinct hardware, covering
+        the bounded-error \emph{lossy} compression role.
+\end{itemize}
+
+The final choice between these alternatives, or another that emerges, is
+made at the start of this phase, according to the maturity of AMD
+compression libraries at that time. The current guidance is to target
+HPDR with an MGARD or ZFP pipeline as the Bitcomp replacement. With the
+compression stack ported, the validation proper proceeds:
+
+\begin{itemize}
+  \item We port the same tagging and tiling logic to Santos Dumont's AMD
+        Instinct MI300A nodes via ROCm/HIP (rocBLAS, hipBLAS, and AMD's
+        own reduced-precision matrix paths), without assuming feature
+        parity with the CUDA-specific path.
+  \item We test whether the Phase 3 criteria and the precision $\times$
+        compression factorial methodology hold on a CDNA3 architecture,
+        re-running the same evaluation protocol used on the NVIDIA GPUs,
+        now with the AMD compressor in place of Bitcomp.
   \item We test whether the \emph{a priori} estimator built in Phase 2,
         derived from the velocity model and architecture-independent,
         transfers directly, without retuning, to the MI300A.
@@ -498,8 +532,14 @@ criteria, and the joint precision-compression error budget, transfers to
 AMD's ROCm/HIP ecosystem (rocBLAS, hipBLAS, and AMD's own
 reduced-precision matrix paths), without assuming feature parity with the
 CUDA-specific Ozaki-scheme emulation or nvCOMP/Bitcomp compression path.
-The goal is to determine whether Precision-AMR is a portable methodology
-or an NVIDIA-specific optimization.
+This last gap is concrete: there is no HIP port of Bitcomp,
+hipCOMP-core~\cite{hipcompcore} is still \emph{early-access}, and generic
+\emph{lossless} compression yields only 1.03 to 1.04$\times$ on
+floating-point seismic data~\cite{kunas2026amdcompression}, which
+motivates using a portable bounded-error \emph{lossy} compressor such as
+HPDR~\cite{chen2025hpdr} in Phase 5. The goal is to determine whether
+Precision-AMR is a portable methodology or an NVIDIA-specific
+optimization.
 
 % ============================================================================
 % OLD BLOCK (pre-FAPESP restructuring) --- kept for reference.
@@ -878,11 +918,59 @@ accuracy-critical.
 
 \section{Evaluation}
 
-All experiments span three datasets (Large, Marmousi3D, Salt), three
-checkpointing algorithms (Revolve, zCut, Uniform), and the four \pamr{} tagging
-criteria (individually and in combination). Kernel-level profiling uses Nsight
-Compute (roofline, memory-traffic breakdowns); timeline profiling uses Nsight
-Systems. Implementation is in C/C++ with CUDA under the HPC SDK, with OpenMP
+\subsection{Datasets}
+
+The experiments use six datasets. Five are open synthetic models, widely
+used as benchmarks by the seismic imaging community, and the sixth is a
+large in-house model, used mainly in the scalability tests.
+
+The term \emph{SEG/EAGE open data}~\cite{segopendata} denotes the body of
+synthetic velocity models and seismic datasets released publicly by the
+\emph{Society of Exploration Geophysicists} (SEG) and the \emph{European
+Association of Geoscientists and Engineers} (EAGE) for benchmarking
+processing and imaging algorithms (migration, velocity analysis, multiple
+suppression), for the study of wave propagation in complex geological
+media, and for comparing hardware platforms. These data are
+non-confidential and free for research use.
+
+\begin{itemize}
+  \item \textbf{Marmousi3D:} a three-dimensional extension of the Marmousi
+        model~\cite{versteeg1994marmousi}, a synthetic model of complex
+        geological structure, with intense faulting and strong lateral
+        velocity variation, which has become a standard benchmark for FWI
+        and RTM.
+  \item \textbf{SEG/EAGE Salt:} a 3D model with a large, complex-geometry
+        salt body over a faulted sedimentary sequence, part of the
+        SEG/EAGE 3-D Modeling Series~\cite{aminzadeh1997segeage}. It is
+        the canonical subsalt imaging benchmark.
+  \item \textbf{SEG/EAGE Overthrust:} a 3D model of a thrust belt
+        (compressional tectonics), with steeply dipping structure and
+        strong lateral velocity variation, also from the SEG/EAGE 3-D
+        Modeling Series~\cite{aminzadeh1997segeage}. It tests imaging
+        under strong shallow heterogeneity.
+  \item \textbf{Sigsbee 2A and Sigsbee 2B:} 2D synthetic subsalt models,
+        inspired by the Sigsbee Escarpment in the Gulf of Mexico and
+        released by the SMAART JV consortium~\cite{paffenholz2002sigsbee}.
+        The 2A model is a constant-density acoustic model without
+        free-surface multiples; the 2B model adds strong internal and
+        free-surface multiples. They are classic benchmarks for subsalt
+        imaging under low signal-to-noise conditions.
+  \item \textbf{Large:} a large in-house model (velocities and traces on
+        numerical grids), used mainly in the multi-node scalability tests,
+        as it requires the largest volume of wavefield state and
+        checkpoints.
+\end{itemize}
+
+All are numerical grids of seismic velocity models and traces, with no
+personal data and no confidentiality restriction.
+
+\subsection{Evaluation protocol}
+
+All experiments span the six datasets above, three checkpointing
+algorithms (Revolve, zCut, Uniform), and the four \pamr{} tagging criteria
+(individually and in combination). Kernel-level profiling uses Nsight
+Compute (roofline, memory-traffic breakdowns); timeline profiling uses
+Nsight Systems. Implementation is in C/C++ with CUDA under the HPC SDK, with OpenMP
 Cluster for multi-node scaling. Accuracy is evaluated on both the wavefield and
 the final RTM image, since a tiling that preserves wavefield PSNR/SSIM may still,
 in principle, shift the migrated image if error is spatially correlated with
