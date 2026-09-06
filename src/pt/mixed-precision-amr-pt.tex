@@ -254,8 +254,8 @@ mas não verificadas contra o comportamento numérico real.
 \textbf{Método:} instrumentar o solucionador para registrar, a partir de
 execuções de referência em FP64, estatísticas do \emph{range} dinâmico do
 campo de onda por bloco e por passo de tempo: histograma de expoentes,
-magnitude mínima/máxima, variância, nos três conjuntos de dados
-(Large, Marmousi3D, Salt).
+magnitude mínima/máxima, variância, nos seis conjuntos de dados descritos
+na seção de Avaliação.
 
 \begin{itemize}
   \item Correlacionar essas estatísticas com atributos derivados do
@@ -377,7 +377,7 @@ esquema de Ozaki para blocos sinalizados como críticos para a precisão.
   \item Todos os erros são delimitados conjuntamente (interação
         compressão $\times$ precisão, seguindo a metodologia da Fase 3)
         em relação à linha de base em FP64, usando PSNR, SSIM e erro
-        relativo médio, nos mesmos três conjuntos de dados e três
+        relativo médio, nos mesmos seis conjuntos de dados e três
         algoritmos de checkpointing (Revolve, zCut, Uniform) usados ao
         longo de todo o projeto.
 \end{itemize}
@@ -388,21 +388,54 @@ esquema de Ozaki para blocos sinalizados como críticos para a precisão.
 \textbf{Desafio:} os critérios de marcação são motivados pela física da
 propagação de ondas e pela sensibilidade adjunta, não pelas unidades
 aritméticas de um fabricante específico. Essa portabilidade, porém, é uma
-afirmação que precisa ser testada, não apenas presumida, especialmente
-porque a AMD não oferece equivalente direto ao esquema de Ozaki nem ao
-nvCOMP/Bitcomp.
+afirmação que precisa ser testada, não apenas presumida. O obstáculo
+concreto é a pilha de compressão: o GPUZIP hoje comprime checkpoints com o
+Bitcomp, que é proprietário da NVIDIA e não tem port para HIP, de modo que
+não existe suporte a compressão de checkpoints em GPUs AMD. Compressão
+\emph{lossless} genérica (LZ4, Snappy, Cascaded) não resolve o problema:
+Künas et al.~\cite{kunas2026amdcompression} portaram esses algoritmos de
+CUDA para HIP e mediram, em GPUs AMD CDNA e RDNA (incluindo a MI300X, da
+mesma família CDNA3 da MI300A), razão de compressão de apenas 1,03 a
+1,04$\times$ para dados sísmicos de ponto flutuante, independentemente da
+arquitetura. É por isso que o GPUZIP usa compressão com perdas de erro
+controlado, e é esse componente que precisa ser reconstruído para AMD.
 
-\textbf{Método:} com o tempo dedicado que um programa de 36 meses permite,
-portamos a mesma lógica de marcação e \emph{tiling} para os nós AMD
-Instinct MI300A do Santos Dumont via ROCm/HIP (rocBLAS, hipBLAS e os
-próprios caminhos de matriz de precisão reduzida da AMD), sem assumir
-paridade de recursos com o caminho CUDA-específico.
+\textbf{Método:} a Fase 5 começa pela incorporação, no GPUZIP, de uma
+biblioteca de compressão com suporte nativo a AMD, substituindo o caminho
+Bitcomp/nvCOMP na arquitetura CDNA3. As opções consideradas são:
 
 \begin{itemize}
+  \item \textbf{hipCOMP-core}~\cite{hipcompcore}: port em HIP dos mesmos
+        algoritmos do nvCOMP (LZ4, Snappy, Cascaded), com backends HIP/AMD
+        e HIP/CUDA. É o análogo direto do nvCOMP, mas ainda em
+        \emph{early-access} e não otimizado para GPUs AMD, e cobre apenas
+        o caso \emph{lossless}.
+  \item \textbf{HPDR}~\cite{chen2025hpdr}: framework portável com
+        adaptadores nativos para OpenMP, CUDA e HIP, que implementa
+        pipelines de MGARD (compressão \emph{lossy} multinível com erro
+        limitado em quantidades de interesse), ZFP (compressão de taxa
+        fixa para \emph{arrays} multidimensionais) e Huffman. Foi avaliado
+        em até 1.024 nós do Frontier (GPUs AMD Instinct MI250X), com
+        \emph{throughput} de redução de dados de até 103\,TB/s. É o
+        equivalente funcional mais maduro ao Bitcomp em hardware Instinct,
+        cobrindo o papel de compressão \emph{lossy} com erro controlado.
+\end{itemize}
+
+A escolha definitiva entre essas alternativas, ou outra que surja, é feita
+no início da execução desta fase, conforme a maturidade das bibliotecas de
+compressão para AMD naquele momento. A orientação atual é mirar o HPDR com
+pipeline MGARD ou ZFP como substituto do Bitcomp. Com a pilha de compressão
+portada, prossegue a validação propriamente dita:
+
+\begin{itemize}
+  \item Portamos a mesma lógica de marcação e \emph{tiling} para os nós AMD
+        Instinct MI300A do Santos Dumont via ROCm/HIP (rocBLAS, hipBLAS e
+        os próprios caminhos de matriz de precisão reduzida da AMD), sem
+        assumir paridade de recursos com o caminho CUDA-específico.
   \item Testamos se os critérios da Fase 3 e a metodologia fatorial de
-        precisão $\times$ compressão da Fase 3 se sustentam em uma
-        arquitetura CDNA3, reexecutando o mesmo protocolo de avaliação
-        usado nas GPUs NVIDIA.
+        precisão $\times$ compressão se sustentam em uma arquitetura CDNA3,
+        reexecutando o mesmo protocolo de avaliação usado nas GPUs NVIDIA,
+        agora com o compressor AMD no lugar do Bitcomp.
   \item Testamos se o estimador \emph{a priori} construído na Fase 2,
         derivado do modelo de velocidade e independente de arquitetura,
         transfere diretamente, sem reajuste, para o MI300A.
@@ -528,8 +561,15 @@ orçamento conjunto de erro de precisão e compressão, se transfere para o
 ecossistema ROCm/HIP da AMD (rocBLAS, hipBLAS e os próprios caminhos de
 matriz de precisão reduzida da AMD), sem assumir paridade de recursos com a
 emulação do esquema de Ozaki, específica da CUDA, ou com o caminho de
-compressão nvCOMP/Bitcomp. O objetivo é determinar se o Precision-AMR é uma
-metodologia portável ou uma otimização específica da NVIDIA.
+compressão nvCOMP/Bitcomp. Esse último gap é concreto: não há port do
+Bitcomp para HIP, o hipCOMP-core~\cite{hipcompcore} ainda é
+\emph{early-access}, e a compressão \emph{lossless} genérica rende apenas
+1,03 a 1,04$\times$ em dados sísmicos de ponto
+flutuante~\cite{kunas2026amdcompression}, o que motiva o uso de um
+compressor \emph{lossy} portável de erro controlado como o
+HPDR~\cite{chen2025hpdr} na Fase 5. O objetivo é determinar se o
+Precision-AMR é uma metodologia portável ou uma otimização específica da
+NVIDIA.
 
 % ============================================================================
 % BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
@@ -950,8 +990,61 @@ pelo esquema de Ozaki para blocos sinalizados como críticos para a precisão.
 
 \section{Avaliação}
 
-Todos os experimentos abrangem três conjuntos de dados (Large, Marmousi3D,
-Salt), três algoritmos de checkpointing (Revolve, zCut, Uniform) e os quatro
+Esta seção detalha o plano de avaliação do projeto. O plano inclui o conjunto
+de dados e o protocolo de avaliação.
+
+\subsection{Conjuntos de dados}
+
+Os experimentos usam seis conjuntos de dados. Cinco são modelos sintéticos
+abertos, amplamente usados como referência pela comunidade de imageamento
+sísmico, e o sexto é um modelo interno de grande porte, empregado
+principalmente nos testes de escalabilidade.
+
+O termo \emph{SEG/EAGE open data}~\cite{segopendata} designa o acervo de
+modelos de velocidade e conjuntos de dados sísmicos sintéticos
+disponibilizados publicamente pela \emph{Society of Exploration
+Geophysicists} (SEG) e pela \emph{European Association of Geoscientists and
+Engineers} (EAGE) para \emph{benchmark} de algoritmos de processamento e
+imageamento (migração, análise de velocidade, supressão de múltiplas), para
+o estudo da propagação de ondas em meios geológicos complexos e para a
+comparação de plataformas de hardware. São dados não confidenciais e de uso
+livre para pesquisa.
+
+\begin{itemize}
+  \item \textbf{Marmousi3D:} extensão tridimensional do modelo
+        Marmousi~\cite{versteeg1994marmousi}, um modelo sintético de
+        estrutura geológica complexa, com falhamento intenso e fortes
+        variações laterais de velocidade, que se tornou referência padrão
+        para FWI e RTM.
+  \item \textbf{SEG/EAGE Salt:} modelo 3D com um corpo de sal grande e de
+        geometria complexa sobre uma sequência sedimentar falhada, parte da
+        SEG/EAGE 3-D Modeling Series~\cite{aminzadeh1997segeage}. É o
+        \emph{benchmark} canônico de imageamento sub-sal.
+  \item \textbf{SEG/EAGE Overthrust:} modelo 3D de um cinturão de
+        cavalgamento (tectônica compressiva), com estruturas fortemente
+        inclinadas e grande variação lateral de velocidade, também da
+        SEG/EAGE 3-D Modeling Series~\cite{aminzadeh1997segeage}. Testa o
+        imageamento sob forte heterogeneidade rasa.
+  \item \textbf{Sigsbee 2A e Sigsbee 2B:} modelos sintéticos 2D de ambiente
+        sub-sal, inspirados no Escarpamento de Sigsbee no Golfo do México e
+        disponibilizados pelo consórcio SMAART JV~\cite{paffenholz2002sigsbee}.
+        O 2A é um modelo acústico de densidade constante, sem múltiplas de
+        superfície livre; o 2B acrescenta múltiplas internas e de superfície
+        livre fortes. São referências clássicas para imageamento sub-sal em
+        condições de baixa relação sinal-ruído.
+  \item \textbf{Large:} modelo interno de grande porte (velocidades e traços
+        em grades numéricas), usado sobretudo nos testes de escalabilidade
+        multi-nó, por exigir o maior volume de estado de campo de onda e de
+        checkpoints.
+\end{itemize}
+
+Todos são grades numéricas de modelos de velocidade e traços sísmicos, sem
+dados pessoais e sem restrição de confidencialidade.
+
+\subsection{Protocolo de avaliação}
+
+Todos os experimentos abrangem os seis conjuntos de dados acima, três
+algoritmos de checkpointing (Revolve, zCut, Uniform) e os quatro
 critérios de marcação do \pamr{} (individualmente e em combinação). A
 perfilagem em nível de kernel usa o Nsight Compute (\emph{roofline},
 detalhamento de tráfego de memória); a perfilagem de linha do tempo usa o
