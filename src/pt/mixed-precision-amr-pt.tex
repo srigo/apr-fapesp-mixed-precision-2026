@@ -351,7 +351,8 @@ como a Fase 2 exige.
 
 O escopo de validação deste projeto é, portanto, deliberadamente
 concentrado: o \pamr{} será demonstrado na RTM, sobre o Awave-3D. Essa
-delimitação é metodológica, não conceitual. Os quatro critérios de marcação
+é uma delimitação metodológica, para definir claramente esse escopo.
+Porém não existe delimitação conceitual, pois os quatro critérios de marcação
 são formulados em termos de grandezas que qualquer solucionador adjunto de
 EDPs hiperbólicas possui, a saber, camada absorvente, densidade de energia
 do campo, magnitude da sensibilidade adjunta e posição da frente de onda, e
@@ -364,15 +365,16 @@ outras aplicações de propagação de ondas em trabalhos futuros.
 \subsection{Fase 1 --- Infraestrutura e Linha de Base (M1--M4)}
 
 \textbf{Desafio:} antes de qualquer alteração de precisão, é preciso
-reproduzir fielmente as linhas de base do GPUZIP/Awave-3D sob o HPC SDK e
+reproduzir fielmente as linhas de base do GPUZIP/Awave-3D usando o HPC SDK compatível 
+com arquieturas mais modernas de GPU e
 garantir que a decomposição em blocos usada para checkpointing possa
 também carregar uma marca de precisão por bloco, um pré-requisito de
 engenharia do qual todas as fases seguintes dependem.
 
-\textbf{Método:} portar o Awave-3D e o GPUZIP para o HPC SDK (nvc++),
-reintegrar o nvCOMP/Bitcomp e reproduzir as linhas de base em V100 na
-partição V100 do Santos Dumont, compatível com o hardware original do
-GPUZIP.
+\textbf{Método:} portar o Awave-3D e o GPUZIP para o HPC SDK (nvc++) em versões mais novas. 
+Reintegrar o nvCOMP/Bitcomp e reproduzir as linhas de base tanto na
+partição V100 do Santos Dumont quanto em partições mais novas, verificando a compatibilidade com o hardware 
+e bibliotecas mais novas da arquietura NVIDIA, como o CUDA 13.
 
 \begin{itemize}
   \item Estabelecer uma decomposição do domínio em blocos/\emph{tiles},
