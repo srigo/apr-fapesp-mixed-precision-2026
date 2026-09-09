@@ -59,10 +59,17 @@ precision to remain trustworthy. Reverse Time Migration (RTM), a seismic
 imaging method that solves the wave equation by finite differences over
 thousands of time steps, is a canonical example of this tension:
 geophysicists use the migrated image to guide expensive drilling decisions,
-so numerical fidelity is essential. RTM is also memory-intensive, requiring
-hundreds of gigabytes of wavefield state and relying on checkpointing to
-trade memory against recomputation in its forward/backward adjoint
-structure.
+so numerical fidelity is essential. Closely related, Full Waveform Inversion
+(FWI) estimates the subsurface velocity model itself, iteratively minimizing
+the difference between observed and simulated seismograms. Its gradient is
+obtained by the adjoint method, correlating the forward wavefield with the
+back-propagated adjoint field. RTM and FWI therefore share the same
+computational core, forward propagation followed by backward propagation
+with correlation between the two fields, and consequently the same
+bottleneck: both are memory-intensive, require hundreds of gigabytes of
+wavefield state, and rely on checkpointing to trade memory against
+recomputation in that adjoint structure. In FWI the cost is further
+amplified, because this structure repeats at every inversion iteration.
 
 Our prior work tackled this structure's main bottleneck, namely host--GPU
 checkpoint transfer over PCIe, by combining the concept of prefetching with
@@ -86,20 +93,32 @@ update rule, degrading solution quality, with compensated (Kahan) summation
 as an effective remedy.
 
 At the same time, adaptive mesh refinement (AMR) has been explored for
-seismic wave simulation and, more recently, explicitly for FWI and RTM
+seismic wave simulation and, more recently, explicitly for
+FWI~\cite{thrastarson2020wavefield2,takekawa2016adaptive} and
+RTM~\cite{yang2024elasticrtm,lu2024nested,cho2019frequency,liu2020topography}
 workflows, to avoid the waste inherent in a uniform grid: dispersion and
 dissipation errors require grid spacing proportional to the shortest
 wavelength, so a uniform mesh is forced to use the finest spacing
 everywhere, even where the local velocity field would tolerate a much
-coarser one. AMR addresses this by refining $\Delta x$ locally. No
-comparable, physically motivated scheme exists for floating-point precision,
-however: existing mixed-precision work in seismic imaging is either global
-and uniform (as above), or adaptive only at the level of an individual
-linear-algebra operation (mixed-precision GEMM, iterative refinement,
-Ozaki-scheme emulation), not tied to a spatial decomposition of the
-wavefield itself. None of this prior work varies floating-point precision
-according to physically motivated spatial criteria. This is therefore a
-third axis of adaptivity that remains largely unexplored.
+coarser one. AMR addresses this by refining $\Delta x$ locally. Over four
+decades, since the seminal work of Berger and Colella~\cite{berger1989amr},
+this idea has consolidated into a well-established taxonomy of adaptivity
+axes: cell-size refinement (h), polynomial-order enrichment (p), the
+combination of the two (hp), and vertex relocation without changing the
+topology (r). All of these axes, however, act on the geometric
+discretization of the domain~\cite{vivarelli2025review}. No comparable,
+physically motivated scheme exists for floating-point precision: existing
+mixed-precision work in seismic imaging is either global and uniform (as
+above), or adaptive only at the level of an individual linear-algebra
+operation (mixed-precision GEMM, iterative refinement, Ozaki-scheme
+emulation~\cite{ozaki2012errorfree}), not tied to a spatial decomposition of
+the wavefield itself. None of this prior work varies floating-point
+precision according to physically motivated spatial criteria. A literature
+survey we conducted on AMR and on AMR applied to RTM/FWI confirms this
+picture: the works retrieved adapt mesh resolution, order, or position, and
+none adapts arithmetic precision. This is therefore an axis of adaptivity
+orthogonal to the established ones, and one that remains largely
+unexplored.
 
 This project proposes to close that gap with Precision-AMR (\pamr{}): a
 spatially block-structured scheme, an adaptive-precision analogue of AMR,
@@ -155,7 +174,9 @@ includes the formulation of the four tagging criteria, the characterization
 of the ``precision-interface'' artifact, analogous to the coarse-fine
 interface reflections of classical AMR, and the demonstration that the
 precision and lossy-compression budgets can be unified into a single
-per-tile error target.
+per-tile error target. It amounts to adding an arithmetic axis to a
+taxonomy of adaptivity that, since Berger and Colella~\cite{berger1989amr},
+has remained entirely geometric~\cite{vivarelli2025review}.
 
 As secondary contributions, the project will produce: (i) a
 multi-architecture evaluation of P-AMR-guided mixed-precision usage,
@@ -192,9 +213,24 @@ computational cost and storage. Davis and LeVeque~\cite{davis2015adjoint}
 further show that refinement indicators guided by the adjoint computation,
 and not just by local smoothness of the field, produce more efficient mesh
 refinements in hyperbolic wave-propagation problems, the same logic that
-motivates \pamr{}'s sensitivity (FWI) criterion. None of these works,
-however, varies \emph{floating-point precision} instead of \emph{mesh
-resolution}. Nor does any of them characterize empirically how the
+motivates \pamr{}'s sensitivity (FWI) criterion.
+
+This picture is consistent with the broader state of the art in AMR. The
+review by Vivarelli et al.~\cite{vivarelli2025review} identifies the
+refinement indicator as the hardest open question in the field: indicators
+based on local features of the field are cheap, but tend to over-refine and
+do not guarantee a reduction of the error in the quantity of interest,
+whereas adjoint-guided indicators achieve higher accuracy in fewer
+adaptation steps, at the cost of greater complexity. On the infrastructure
+side, block-structured decomposition is the granularity that sustains AMR
+codes at exascale~\cite{zhang2021amrex}, and the interaction between
+adaptivity and increasing hardware heterogeneity is recognized by the AMR
+community itself as an additional, still unresolved axis of
+complexity~\cite{dubey2021portability}.
+
+None of these works, however, varies \emph{floating-point precision}
+instead of \emph{mesh resolution}. Nor does any of them characterize
+empirically how the
 numerical behavior of an RTM/FWI simulation, that is, the dynamic range of
 floating-point values actually exercised, distributes across space and
 time. This double gap, the absence of a physically motivated
@@ -238,6 +274,24 @@ anticipated directly from the input velocity model, before the wave even
 propagates. Without that characterization, the tagging criteria remain
 plausible hypotheses that have not yet been verified against actual
 numerical behavior.
+
+There is, however, an encouraging precedent on the neighboring geometric
+axis: in seismic AMR, the input velocity model is already used successfully
+as an \emph{a priori} predictive signal for adapting resolution. Takekawa
+and Mikada~\cite{takekawa2016adaptive} subdivide calculation points located
+in low-velocity zones; Liu and Zhang~\cite{liu2020topography} use coarse
+grids in high-velocity zones and fine grids in low-velocity zones for
+LSRTM; Roberts et al.~\cite{roberts2022spyro} size elements by the local
+P-wavespeed and the peak source frequency; Aghamiry et
+al.~\cite{aghamiry2022wavelength} tune stencil weights to the local number
+of grid points per wavelength; and Santos et
+al.~\cite{santos2024optimaltransport} adapt the mesh directly to the
+velocity field through optimal transport, delineating salt bodies and sharp
+interfaces without incurring the I/O cost of re-meshing. None of these
+works, however, tests whether the same signal predicts \emph{tolerance to
+round-off error}, and not merely the required spatial resolution. It is
+exactly this transposition, from an already validated geometric axis to the
+arithmetic axis, that Phase 2 investigates.
 
 \textbf{Method:} instrument the solver to record, from FP64 reference
 runs, dynamic-range statistics of the wavefield per block and per time
@@ -292,13 +346,23 @@ spatial precision zoning:
         magnitude of the local adjoint-sensitivity kernel, reusing the
         gradient computation itself as the tagging signal, in direct
         analogy to the adjoint-guided refinement of Davis and
-        LeVeque~\cite{davis2015adjoint} and to the Berger--Oliger
-        truncation-error estimator in classical AMR.
+        LeVeque~\cite{davis2015adjoint} and to the truncation-error
+        estimators of classical AMR~\cite{berger1989amr}.
   \item \textbf{Wavefront-trailing criterion:} a time-dependent band
         immediately behind the propagating wavefront is tagged for
         reduced precision, while the leading edge, where phase accuracy
         governs the imaging condition, retains full precision.
 \end{itemize}
+
+The four criteria deliberately cover the two families of indicators
+identified in the AMR literature~\cite{vivarelli2025review}: the boundary,
+energy, and wavefront-trailing criteria rest on local features of the field
+and are cheap to evaluate, whereas the sensitivity criterion is
+adjoint-guided, more expensive but targeted at the quantity of interest.
+Indicators grounded in physical structure, rather than in raw gradients,
+have already demonstrated cost reductions of up to 70\% in AMR for
+fluid flows~\cite{kumar2025dominant}, which supports the methodological bet
+of this phase.
 
 For each criterion, we implement compensated (Kahan) summation in the
 low-precision tiles' time-stepping update to control round-off
@@ -377,7 +441,10 @@ HIP and measured, on AMD CDNA and RDNA GPUs (including the MI300X, of the
 same CDNA3 family as the MI300A), a compression ratio of only 1.03 to
 1.04$\times$ for floating-point seismic data, regardless of architecture.
 This is why GPUZIP uses bounded-error lossy compression, and it is this
-component that must be rebuilt for AMD.
+component that must be rebuilt for AMD. The difficulty is not specific to
+this project either: retaining performance portability in adaptive codes in
+the face of increasing hardware heterogeneity is recognized as an open
+problem by the AMR community itself~\cite{dubey2021portability}.
 
 \textbf{Method:} Phase 5 begins by incorporating into GPUZIP a compression
 library with native AMD support, replacing the Bitcomp/nvCOMP path on the
@@ -509,8 +576,11 @@ beyond native low precision (FP32 compute with FP64 accumulation, and
 cuSOLVER iterative refinement).
 
 \paragraph{Ozaki-scheme FP64 emulation} via low-precision tensor cores.
-Adoption: reserved for the subset of tiles that \pamr{}'s sensitivity
-criteria mark as accuracy-critical (near the wavefront, high
+The scheme, introduced by Ozaki et al.~\cite{ozaki2012errorfree},
+decomposes a matrix product into a sum of error-free products, which makes
+it possible to recover high-precision accuracy from lower-precision
+routines. Adoption: reserved for the subset of tiles that \pamr{}'s
+sensitivity criteria mark as accuracy-critical (near the wavefront, high
 adjoint-sensitivity magnitude), rather than applied uniformly. This
 directly tests whether selective emulation is cheaper than emulating
 everywhere while preserving image fidelity. Recent work has demonstrated
@@ -1083,6 +1153,13 @@ reflectors. For the cross-architecture activity, the same accuracy metrics are
 computed on Santos Dumont's AMD MI300A partition and compared against the NVIDIA
 baselines, to characterise how much of the achieved speedup and accuracy
 trade-off is architecture-independent.
+
+To quantify the benefit of adaptivity independently of architecture and
+implementation, we adopt metrics in the spirit of those proposed by
+Beisiegel et al.~\cite{beisiegel2021metrics} for AMR, correlating numerical
+error, effective resolution, and run time per degree of freedom. This makes
+it possible to separate the gain attributable to precision zoning itself
+from the gain attributable to the implementation on a specific GPU.
 
 \subsection{Dissemination strategy}
 

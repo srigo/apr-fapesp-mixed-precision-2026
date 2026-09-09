@@ -60,25 +60,33 @@ Reversa no Tempo (Reverse Time Migration, RTM), método de imageamento sísmico
 que resolve a equação da onda por diferenças finitas ao longo de milhares de
 passos de tempo, é um exemplo canônico dessa tensão: geofísicos usam a imagem
 migrada para orientar decisões de perfuração de alto custo, de modo que a
-fidelidade numérica é essencial. A RTM também é intensiva em memória,
-exigindo centenas de gigabytes de estado do campo de onda e dependendo de
-checkpointing para trocar memória por recomputação em sua estrutura adjunta
-de propagação direta/reversa.
+fidelidade numérica é essencial. Estreitamente relacionada, a Inversão
+Completa da Forma de Onda (Full Waveform Inversion, FWI) estima o próprio
+modelo de velocidade do subsolo, minimizando iterativamente a diferença
+entre os sismogramas observados e os simulados. Seu gradiente é obtido pelo
+método adjunto, correlacionando o campo de onda direto com o campo adjunto
+retropropagado. RTM e FWI compartilham, portanto, o mesmo núcleo
+computacional, a propagação direta seguida da propagação reversa com
+correlação entre os dois campos, e por consequência o mesmo gargalo: ambas
+são intensivas em memória, exigem centenas de gigabytes de estado do campo
+de onda e dependem de checkpointing para trocar memória por recomputação
+nessa estrutura adjunta. Na FWI o custo é ainda amplificado, porque essa
+estrutura se repete a cada iteração da inversão.
 
 Nosso trabalho anterior atacou o principal gargalo dessa estrutura, isto é, a
 transferência de checkpoints entre host e GPU via PCIe, com a combinação do conceito de prefetching com a compressão de dados.
 Essa ideia foi materializada como a biblioteca GPUZIP~\cite{maltempi2025checkpointing,gpuzip}, que comprime os checkpoints
 na GPU e os pré-busca de forma proativa, reduzindo o volume de transferência
 host--GPU em até 80$\times$ e alcançando ganhos de desempenho ponta a ponta
-de até 5,1$\times$ na V100, preservando a qualidade da imagem (SSIM
+de até 5,1$\times$ na GPU com arquitetura NVIDIA Volta V100, preservando a qualidade da imagem (SSIM
 $\approx$ 1, erro relativo próximo de zero). Separadamente, já se demonstrou
-que a aritmética de precisão reduzida é viável para modelagem sísmica, RTM e
-FWI: Fabien-Ouellet~\cite{fabienouellet2020half} constatou que uma
+que a aritmética de precisão reduzida é viável para modelagem sísmica, tanto
+para RTM como para FWI: Fabien-Ouellet~\cite{fabienouellet2020half} constatou que uma
 implementação estável em meia precisão (FP16) da equação de onda elástica é
 alcançável por meio de escalonamento (\emph{scaling}) apropriado, que o erro
 resultante no sismograma é uma fração desprezível da energia sísmica total e
 majoritariamente incoerente com as fases sísmicas, e que esse ruído não
-prejudica a qualidade das imagens de FWI ou RTM. Entretanto, essa redução é
+prejudica a qualidade das imagens finais de FWI ou RTM. Entretanto, essa redução é
 aplicada de forma uniforme em todo o domínio computacional. Gao e
 Harms~\cite{gao2023half} identificaram um risco específico dessa abordagem:
 a integração no tempo em meia precisão de forma ingênua acumula erro de
@@ -88,21 +96,33 @@ atualização, degradando a qualidade da solução, sendo a somatória compensad
 
 Ao mesmo tempo, o refinamento adaptativo de malha (Adaptive Mesh Refinement,
 AMR) tem sido explorado na simulação de ondas sísmicas e, mais recentemente,
-explicitamente em fluxos de trabalho de FWI e RTM, para evitar o desperdício
-inerente a uma malha uniforme: os erros de dispersão e dissipação exigem
-espaçamento de malha proporcional ao menor comprimento de onda, de modo que
-uma malha uniforme é forçada a usar o espaçamento mais fino em toda parte,
-mesmo onde o campo de velocidade local toleraria um espaçamento bem mais
-grosseiro. O AMR resolve isso refinando o $\Delta x$ localmente. Não existe,
-porém, esquema comparável e fisicamente motivado para a precisão de ponto
-flutuante: os trabalhos existentes de precisão mista em imageamento sísmico
-são globais e uniformes (como acima), ou adaptativos apenas no nível de uma
-operação individual de álgebra linear (GEMM de precisão mista, refinamento
-iterativo, emulação pelo esquema de Ozaki), sem estar vinculados a uma
-decomposição espacial do próprio campo de onda. Nenhum desses trabalhos varia
-a precisão de ponto flutuante segundo critérios espaciais fisicamente
-motivados. Esse é um terceiro eixo de adaptabilidade que permanece, portanto,
-praticamente inexplorado.
+explicitamente em fluxos de trabalho de FWI~\cite{thrastarson2020wavefield2,
+takekawa2016adaptive} e RTM~\cite{yang2024elasticrtm,lu2024nested,
+cho2019frequency,liu2020topography}, para evitar o desperdício inerente a
+uma malha uniforme:
+os erros de dispersão e dissipação exigem espaçamento de malha proporcional
+ao menor comprimento de onda, de modo que uma malha uniforme é forçada a
+usar o espaçamento mais fino em toda parte, mesmo onde o campo de velocidade
+local toleraria um espaçamento bem mais grosseiro. O AMR resolve isso
+refinando o $\Delta x$ localmente. Ao longo de quatro décadas, desde o
+trabalho seminal de Berger e Colella~\cite{berger1989amr}, essa ideia se
+consolidou em uma taxonomia bem estabelecida de eixos de adaptividade:
+refinamento do tamanho de célula (h), enriquecimento da ordem polinomial
+(p), a combinação dos dois (hp) e relocação de vértices sem alterar a
+topologia (r). Todos esses eixos, porém, atuam sobre a discretização
+geométrica do domínio~\cite{vivarelli2025review}. Não existe esquema
+comparável e fisicamente motivado para a precisão de ponto flutuante: os
+trabalhos existentes de precisão mista em imageamento sísmico são globais e
+uniformes (como acima), ou adaptativos apenas no nível de uma operação
+individual de álgebra linear (GEMM de precisão mista, refinamento iterativo,
+emulação pelo esquema de Ozaki~\cite{ozaki2012errorfree}), sem estar
+vinculados a uma decomposição espacial do próprio campo de onda. Nenhum desses trabalhos varia a precisão
+de ponto flutuante segundo critérios espaciais fisicamente motivados. Um
+levantamento bibliográfico que conduzimos sobre AMR e sobre AMR aplicado a
+RTM/FWI confirma esse quadro: os trabalhos recuperados adaptam resolução,
+ordem ou posição da malha, e nenhum adapta a precisão aritmética. Trata-se,
+portanto, de um eixo de adaptividade ortogonal aos já consolidados, que
+permanece praticamente inexplorado.
 
 Este projeto propõe preencher essa lacuna com o Precision-AMR (\pamr{}): um
 esquema espacialmente estruturado em blocos, análogo de precisão adaptativa
@@ -160,7 +180,10 @@ onda), proposto e validado especificamente para solucionadores adjuntos de
 EDPs como RTM/FWI. Essa contribuição inclui a formulação dos quatro
 critérios de marcação, a caracterização do artefato de ``interface de
 precisão'', análogo às reflexões de interface grossa-fina do AMR clássico, e a demonstração de que os orçamentos de precisão e de compressão com
-perdas podem ser unificados em uma única meta de erro por bloco.
+perdas podem ser unificados em uma única meta de erro por bloco. Trata-se de
+acrescentar um eixo aritmético a uma taxonomia de adaptividade que, desde
+Berger e Colella~\cite{berger1989amr}, permaneceu inteiramente
+geométrica~\cite{vivarelli2025review}.
 
 Como contribuições secundárias, o projeto produzirá: (i) uma avaliação
 multi-arquitetura do uso de precisão mista guiado pelo P-AMR, comparando GPUs
@@ -201,16 +224,31 @@ LeVeque~\cite{davis2015adjoint} mostram, ainda, que indicadores de
 refinamento guiados pelo cálculo adjunto, e não apenas pela suavidade
 local do campo, produzem refinamentos de malha mais eficientes em
 problemas de propagação de ondas hiperbólicas, a mesma lógica que motiva o
-critério de sensibilidade (FWI) do \pamr{}. Nenhum desses trabalhos, no
-entanto, varia a \emph{precisão de ponto flutuante} em vez da
-\emph{resolução da malha}. Nenhum caracteriza empiricamente, tampouco, como
-o comportamento numérico de uma simulação RTM/FWI, isto é, o \emph{range}
-dinâmico de valores de ponto flutuante efetivamente exercitado, se
-distribui no espaço e no tempo. Essa lacuna dupla, a ausência de um esquema
-de zoneamento de precisão fisicamente motivado e a ausência de
-caracterização empírica que o fundamente antes do desenho dos critérios,
-define os desafios científicos e tecnológicos deste projeto, organizados
-nas seis fases a seguir, ao longo de um programa de 36 meses.
+critério de sensibilidade (FWI) do \pamr{}.
+
+Esse quadro é consistente com o estado da arte mais amplo de AMR. A revisão
+de Vivarelli et al.~\cite{vivarelli2025review} identifica o indicador de
+refinamento como a questão em aberto mais difícil da área: indicadores
+baseados em características locais do campo são baratos, mas tendem a
+super-refinar e não garantem redução do erro na quantidade de interesse,
+enquanto indicadores guiados pelo adjunto atingem maior acurácia em menos
+passos de adaptação, ao custo de maior complexidade. Do lado da
+infraestrutura, a decomposição estruturada em blocos é a granularidade que
+sustenta códigos de AMR em escala exascale~\cite{zhang2021amrex}, e a
+interação entre adaptividade e heterogeneidade crescente de hardware é
+reconhecida pela própria comunidade de AMR como um eixo adicional de
+complexidade ainda não resolvido~\cite{dubey2021portability}.
+
+Nenhum desses trabalhos, no entanto, varia a \emph{precisão de ponto
+flutuante} em vez da \emph{resolução da malha}. Nenhum caracteriza
+empiricamente, tampouco, como o comportamento numérico de uma simulação
+RTM/FWI, isto é, o \emph{range} dinâmico de valores de ponto flutuante
+efetivamente exercitado, se distribui no espaço e no tempo. Essa lacuna
+dupla, a ausência de um esquema de zoneamento de precisão fisicamente
+motivado e a ausência de caracterização empírica que o fundamente antes do
+desenho dos critérios, define os desafios científicos e tecnológicos deste
+projeto, organizados nas seis fases a seguir, ao longo de um programa de 36
+meses.
 
 \subsection{Fase 1 --- Infraestrutura e Linha de Base (M1--M4)}
 
@@ -250,6 +288,24 @@ esse comportamento pode ser antecipado diretamente a partir do modelo de
 velocidade de entrada, antes mesmo de a onda se propagar. Sem essa
 caracterização, os critérios de marcação permanecem hipóteses plausíveis,
 mas não verificadas contra o comportamento numérico real.
+
+Há, contudo, um precedente encorajador no eixo geométrico vizinho: em AMR
+sísmico, o próprio modelo de velocidade de entrada já é usado com sucesso
+como sinal preditivo \emph{a priori} para adaptar a resolução. Takekawa e
+Mikada~\cite{takekawa2016adaptive} subdividem pontos de cálculo situados em
+zonas de baixa velocidade; Liu e Zhang~\cite{liu2020topography} empregam
+malhas grossas em zonas de alta velocidade e finas em zonas de baixa
+velocidade para LSRTM; Roberts et al.~\cite{roberts2022spyro} dimensionam
+os elementos pela velocidade P local e pela frequência de pico da fonte;
+Aghamiry et al.~\cite{aghamiry2022wavelength} ajustam os pesos do estêncil
+ao número local de pontos por comprimento de onda; e Santos et
+al.~\cite{santos2024optimaltransport} adaptam a malha diretamente ao campo
+de velocidade por transporte ótimo, delineando corpos de sal e interfaces
+abruptas sem incorrer no custo de I/O do re-meshing. Nenhum desses
+trabalhos, porém, testa se o mesmo sinal prediz a \emph{tolerância a erro
+de arredondamento}, e não apenas a resolução espacial necessária. É
+exatamente essa transposição, de um eixo geométrico já validado para o eixo
+aritmético, que a Fase 2 investiga.
 
 \textbf{Método:} instrumentar o solucionador para registrar, a partir de
 execuções de referência em FP64, estatísticas do \emph{range} dinâmico do
@@ -308,14 +364,23 @@ marcação para o zoneamento espacial de precisão:
         pela magnitude do kernel de sensibilidade adjunta local,
         reaproveitando o próprio cálculo de gradiente como sinal de
         marcação, em analogia direta ao refinamento guiado pelo adjunto
-        de Davis e LeVeque~\cite{davis2015adjoint} e ao estimador de erro
-        de truncamento de Berger--Oliger no AMR clássico.
+        de Davis e LeVeque~\cite{davis2015adjoint} e aos estimadores de
+        erro de truncamento do AMR clássico~\cite{berger1989amr}.
   \item \textbf{Critério de esteira da frente de onda:} uma faixa
         dependente do tempo, imediatamente atrás da frente de onda em
         propagação, é marcada para precisão reduzida, enquanto a borda
         dianteira, onde a precisão de fase rege a condição de
         imageamento, mantém precisão plena.
 \end{itemize}
+
+Os quatro critérios cobrem deliberadamente as duas famílias de indicadores
+identificadas na literatura de AMR~\cite{vivarelli2025review}: os critérios
+de borda, energia e esteira baseiam-se em características locais do campo e
+são baratos de avaliar, enquanto o critério de sensibilidade é guiado pelo
+adjunto, mais caro porém direcionado à quantidade de interesse. Indicadores
+apoiados em estrutura física, e não em gradiente puro, já demonstraram
+reduções de custo de até 70\% em AMR de escoamentos~\cite{kumar2025dominant},
+o que sustenta a aposta metodológica desta fase.
 
 Para cada critério, implementamos a somatória compensada (de Kahan) na
 atualização de integração no tempo dos blocos de baixa precisão, para
@@ -398,7 +463,11 @@ CUDA para HIP e mediram, em GPUs AMD CDNA e RDNA (incluindo a MI300X, da
 mesma família CDNA3 da MI300A), razão de compressão de apenas 1,03 a
 1,04$\times$ para dados sísmicos de ponto flutuante, independentemente da
 arquitetura. É por isso que o GPUZIP usa compressão com perdas de erro
-controlado, e é esse componente que precisa ser reconstruído para AMD.
+controlado, e é esse componente que precisa ser reconstruído para AMD. A
+dificuldade tampouco é específica deste projeto: manter portabilidade de
+desempenho em códigos adaptativos diante da heterogeneidade crescente de
+hardware é reconhecido como um problema em aberto pela própria comunidade
+de AMR~\cite{dubey2021portability}.
 
 \textbf{Método:} a Fase 5 começa pela incorporação, no GPUZIP, de uma
 biblioteca de compressão com suporte nativo a AMD, substituindo o caminho
@@ -537,11 +606,15 @@ necessitam de precisão além da baixa precisão nativa (computação em FP32 co
 acumulação em FP64, e refinamento iterativo do cuSOLVER).
 
 \paragraph{Emulação de FP64 pelo esquema de Ozaki} via tensor cores de baixa
-precisão. Adoção: reservada ao subconjunto de blocos que os critérios de
-sensibilidade do \pamr{} marcam como críticos para a precisão (próximos à
-frente de onda, com alta magnitude de sensibilidade adjunta), em vez de
-aplicada uniformemente. Isso testa diretamente se a emulação seletiva é mais
-barata do que emular em todo o domínio, preservando a fidelidade da imagem.
+precisão. O esquema, introduzido por Ozaki et
+al.~\cite{ozaki2012errorfree}, decompõe o produto de matrizes em uma soma de
+produtos livres de erro, o que permite recuperar acurácia equivalente à de
+alta precisão a partir de rotinas de precisão mais baixa. Adoção: reservada
+ao subconjunto de blocos que os critérios de sensibilidade do \pamr{} marcam
+como críticos para a precisão (próximos à frente de onda, com alta magnitude
+de sensibilidade adjunta), em vez de aplicada uniformemente. Isso testa
+diretamente se a emulação seletiva é mais barata do que emular em todo o
+domínio, preservando a fidelidade da imagem.
 Trabalhos recentes demonstraram ganhos de até 2,3$\times$ em relação ao DGEMM
 nativo em FP64 em GPUs Blackwell~\cite{uchino2025ozaki}, medidos na placa
 profissional RTX PRO 6000; esperamos resultados comparáveis na RTX 5090,
@@ -1161,6 +1234,13 @@ entre arquiteturas, as mesmas métricas de precisão são calculadas na partiç�
 AMD MI300A do Santos Dumont e comparadas às linhas de base NVIDIA, para
 caracterizar quanto do ganho de desempenho e do compromisso de precisão
 alcançados independe da arquitetura.
+
+Para quantificar o benefício da adaptividade de forma independente de
+arquitetura e de implementação, adotamos métricas no espírito das propostas
+por Beisiegel et al.~\cite{beisiegel2021metrics} para AMR, correlacionando
+erro numérico, resolução efetiva e tempo de execução por grau de liberdade.
+Isso permite separar o ganho atribuível ao próprio zoneamento de precisão do
+ganho atribuível à implementação em uma GPU específica.
 
 \subsection{Estratégias de disseminação}
 
