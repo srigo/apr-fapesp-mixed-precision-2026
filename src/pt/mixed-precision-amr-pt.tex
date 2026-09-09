@@ -3,7 +3,7 @@
 
 \usepackage{fontspec}
 \setmainfont{Arial} % FAPESP APR: fonte Calibri ou Arial, tamanho 12
-\usepackage[brazilian]{babel}
+\usepackage[english,brazilian]{babel} % brazilian = idioma principal
 \usepackage{microtype}
 \usepackage[a4paper,left=3cm,right=1.5cm,top=2.5cm,bottom=2.5cm]{geometry} % FAPESP APR: margens 3cm esq. / 1.5cm dir.
 \usepackage{setspace}
@@ -24,30 +24,115 @@
 
 \newcommand{\pamr}{P\nobreakdash-AMR}
 
-\title{\textbf{Precision-AMR: Precisão de Ponto Flutuante Espacialmente
-Adaptativa para Migração Reversa no Tempo Baseada em EDPs}\\[0.5em]
-\large\normalfont\itshape Um novo eixo de adaptividade numérica para
-solucionadores adjuntos da equação da onda, desenvolvido em hardware NVIDIA
-dedicado e validado em arquiteturas heterogêneas de GPUs NVIDIA e AMD no
-supercomputador Santos Dumont (LNCC)}
-
-\author{}
-\date{}
-
 \begin{document}
 
-\maketitle
+% ============================================================================
+% FOLHA DE ROSTO 1 (português) --- FAPESP APR, item 0 do roteiro:
+% título, Pesquisador Responsável, Instituição Sede e resumo de 20 linhas.
+% ============================================================================
 \thispagestyle{empty}
 
+\begin{center}
+{\large\bfseries Precision-AMR: Precisão de Ponto Flutuante Espacialmente
+Adaptativa para Migração Reversa no Tempo Baseada em EDPs}\\[0.6em]
+{\itshape Um novo eixo de adaptividade numérica para solucionadores
+adjuntos da equação da onda}
+\end{center}
+
+\vspace{1.5em}
+
 \begin{flushleft}
-\textbf{Pesquisador Principal:} Prof.\ Sandro Rigo\\
-\textbf{Cargo/Função:} Professor Associado, Instituto de Computação\\
-\textbf{Universidade:} Universidade Estadual de Campinas (UNICAMP)\\[0.4em]
-\textbf{Colaborador 1:} Thiago Maltempi --- Pesquisador de Pós-Graduação
-(Doutorando), Instituto de Computação, Universidade Estadual de Campinas\\
-\textbf{Colaborador 2:} Prof.\ Hervé Yviquel --- Professor Assistente,
-Instituto de Computação, Universidade Estadual de Campinas
+\textbf{Pesquisador Responsável:} Prof.\ Dr.\ Sandro Rigo\\
+\textbf{Instituição Sede:} Instituto de Computação, Universidade Estadual de
+Campinas (UNICAMP)
 \end{flushleft}
+
+\vspace{1.5em}
+
+\noindent\textbf{Resumo}
+
+\vspace{0.5em}
+
+Simulações baseadas em equações diferenciais parciais, como a Migração
+Reversa no Tempo (RTM) e a Inversão Completa da Forma de Onda (FWI), exigem
+precisão FP64/FP32, enquanto as GPUs modernas se otimizam para cargas de IA
+em baixa precisão. Trabalhos anteriores reduziram a precisão uniformemente
+em todo o domínio; o refinamento adaptativo de malha (AMR), por sua vez,
+variou a resolução espacial conforme o comprimento de onda local, mas todos
+os seus eixos consolidados atuam sobre a discretização geométrica. Este
+projeto propõe o Precision-AMR (\pamr{}), um esquema espacialmente
+estruturado em blocos que varia a precisão de ponto flutuante, e não a
+resolução da malha, segundo quatro critérios fisicamente motivados:
+proximidade da borda absorvente, densidade de energia do campo de onda,
+magnitude da sensibilidade adjunta e uma faixa dependente do tempo atrás da
+frente de onda. Diferentemente do AMR de malha, o ruído de arredondamento se
+propaga junto com a onda, de modo que os critérios precisam prever onde o
+erro injetado não alcançará a condição de imageamento nem o gradiente do
+FWI. O programa de 36 meses inclui uma caracterização empírica do
+\emph{range} dinâmico de ponto flutuante durante a propagação, que dá origem
+a um estimador \emph{a priori} derivado do modelo de velocidade, e um estudo
+fatorial que separa os efeitos da precisão reduzida dos da compressão com
+perdas. A validação usa o Awave-3D e o GPUZIP, em seis conjuntos de dados
+sísmicos e três algoritmos de checkpointing, sobre uma GPU RTX 5090 dedicada
+e as partições NVIDIA e AMD do supercomputador Santos Dumont. Espera-se
+entregar uma biblioteca Precision-AMR de código aberto e uma publicação
+revisada por pares.
+
+\newpage
+
+% ============================================================================
+% FOLHA DE ROSTO 2 (inglês) --- FAPESP APR, item 0 do roteiro.
+% ============================================================================
+\thispagestyle{empty}
+\begin{otherlanguage}{english}
+
+\begin{center}
+{\large\bfseries Precision-AMR: Spatially Adaptive Floating-Point Precision
+for PDE-Based Reverse Time Migration}\\[0.6em]
+{\itshape A new axis of numerical adaptivity for adjoint wave-equation
+solvers}
+\end{center}
+
+\vspace{1.5em}
+
+\begin{flushleft}
+\textbf{Principal Investigator:} Prof.\ Dr.\ Sandro Rigo\\
+\textbf{Host Institution:} Institute of Computing, Universidade Estadual de
+Campinas (UNICAMP)
+\end{flushleft}
+
+\vspace{1.5em}
+
+\noindent\textbf{Abstract}
+
+\vspace{0.5em}
+
+Simulations based on partial differential equations, such as Reverse Time
+Migration (RTM) and Full Waveform Inversion (FWI), require FP64/FP32
+precision, while modern GPUs are optimized for low-precision AI workloads.
+Prior work reduced precision uniformly across the whole domain; adaptive
+mesh refinement (AMR), in turn, varied spatial resolution according to the
+local wavelength, but all of its established axes act on the geometric
+discretization. This project proposes Precision-AMR (\pamr{}), a spatially
+block-structured scheme that varies floating-point precision, rather than
+mesh resolution, according to four physically motivated criteria: proximity
+to the absorbing boundary, wavefield energy density, adjoint-sensitivity
+magnitude, and a time-dependent band trailing the wavefront. Unlike
+mesh-based AMR, round-off noise propagates together with the wave, so the
+criteria must predict where injected error will not reach the imaging
+condition or the FWI gradient. The 36-month programme includes an empirical
+characterization of the floating-point dynamic range during propagation,
+which yields an \emph{a priori} estimator derived from the velocity model,
+and a factorial study that separates the effects of reduced precision from
+those of lossy compression. Validation uses Awave-3D and GPUZIP, across six
+seismic datasets and three checkpointing algorithms, on a dedicated RTX 5090
+GPU and on the NVIDIA and AMD partitions of the Santos Dumont
+supercomputer. The expected deliverables are an open-source Precision-AMR
+library and a peer-reviewed publication.
+
+\end{otherlanguage}
+
+\newpage
 
 \section{Enunciado do Problema}
 
@@ -249,6 +334,32 @@ motivado e a ausência de caracterização empírica que o fundamente antes do
 desenho dos critérios, define os desafios científicos e tecnológicos deste
 projeto, organizados nas seis fases a seguir, ao longo de um programa de 36
 meses.
+
+\paragraph{Aplicação alvo.} Todas as fases são implementadas e validadas
+sobre o Awave-3D, a implementação de RTM desenvolvida internamente pelo
+grupo sob orientação de especialistas em geofísica. O Awave-3D resolve a
+equação acústica da onda por diferenças finitas, distribui os tiros
+(\emph{shots}) entre múltiplas GPUs e implementa a estrutura adjunta de
+propagação direta e reversa com os três algoritmos de checkpointing usados
+neste projeto (Revolve, zCut e Uniform). Foi sobre ele que o GPUZIP foi
+construído e avaliado~\cite{maltempi2025checkpointing}, o que significa que
+partimos de uma base de código que dominamos integralmente, com linhas de
+base de desempenho e de qualidade de imagem já estabelecidas nos mesmos
+conjuntos de dados que usaremos aqui. Essa familiaridade é o que torna
+viável instrumentar o solucionador no nível de bloco e por passo de tempo,
+como a Fase 2 exige.
+
+O escopo de validação deste projeto é, portanto, deliberadamente
+concentrado: o \pamr{} será demonstrado na RTM, sobre o Awave-3D. Essa
+delimitação é metodológica, não conceitual. Os quatro critérios de marcação
+são formulados em termos de grandezas que qualquer solucionador adjunto de
+EDPs hiperbólicas possui, a saber, camada absorvente, densidade de energia
+do campo, magnitude da sensibilidade adjunta e posição da frente de onda, e
+não dependem de nada específico do imageamento sísmico. É por isso que o
+\pamr{} é entregue como biblioteca independente, e não como um módulo
+interno do Awave-3D: a extensão natural imediata é a FWI, que compartilha o
+mesmo núcleo computacional, mas o mesmo mecanismo pode ser aplicado a
+outras aplicações de propagação de ondas em trabalhos futuros.
 
 \subsection{Fase 1 --- Infraestrutura e Linha de Base (M1--M4)}
 
@@ -734,17 +845,25 @@ e pacote público de reprodutibilidade final (REDU).\\
 
 \section{Descrição das Atividades Desenvolvidas pela Equipe}
 
-% TODO: seção a ser redigida por último. Conforme o roteiro do APR, incluir
-% uma descrição breve (até um parágrafo cada) das atividades de:
-%  - Pesquisador Responsável (Sandro Rigo);
-%  - Pesquisadores Associados (Hervé Yviquel);
-%  - bolsistas solicitados (se houver);
-%  - alunos e colaboradores não financiados pela FAPESP (Thiago Maltempi).
+A equipe do projeto é composta por:
 
-\emph{[Placeholder --- seção a ser redigida ao final. Descreverá, em até um
-parágrafo por pessoa, as atividades do Pesquisador Responsável, dos
-Pesquisadores Associados, dos bolsistas solicitados e dos demais
-colaboradores não financiados pela FAPESP.]}
+\begin{itemize}
+  \item \textbf{Prof.\ Dr.\ Sandro Rigo}, Pesquisador Responsável. Professor
+        Associado do Instituto de Computação da UNICAMP.
+  \item \textbf{Prof.\ Dr.\ Hervé Yviquel}, Pesquisador Associado. Professor
+        Assistente do Instituto de Computação da UNICAMP.
+  \item \textbf{Thiago Maltempi}, colaborador. Pesquisador de pós-graduação
+        (doutorando) do Instituto de Computação da UNICAMP, autor principal
+        do GPUZIP~\cite{maltempi2025checkpointing}.
+\end{itemize}
+
+% TODO: descrição das atividades a ser redigida por último. Conforme o
+% roteiro do APR, incluir uma descrição breve (até um parágrafo cada) das
+% atividades de cada integrante acima, além dos bolsistas solicitados.
+
+\emph{[Placeholder --- a descrição das atividades de cada integrante será
+redigida ao final, em até um parágrafo por pessoa, incluindo os bolsistas
+solicitados.]}
 
 % ============================================================================
 % BLOCO ANTIGO (pré-reestruturação FAPESP) --- preservado para referência.
