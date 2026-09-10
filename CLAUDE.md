@@ -183,29 +183,32 @@ replicadas diretamente nas duas versões, sem passar pelo ciclo de aprovação
 
 ## Compilação
 
+**Use o script `build.sh` na raiz do repositório.** Ele é a forma canônica de
+compilar e já faz todo o fluxo: compila, verifica citações/referências
+indefinidas, reporta número de páginas e de referências, e limpa os
+artefatos ao final, mantendo o `.pdf`.
+
+```bash
+./build.sh              # compila as duas versões
+./build.sh pt           # apenas português
+./build.sh en           # apenas inglês
+./build.sh --keep       # mantém os arquivos auxiliares, para depurar erros LaTeX
+```
+
+O script sai com código diferente de zero se a compilação falhar **ou** se
+houver citações/referências indefinidas, então serve também como verificação
+antes de considerar uma alteração concluída.
+
+Por baixo, ele roda, em cada pasta:
+
+```bash
+latexmk -xelatex -interaction=nonstopmode -halt-on-error mixed-precision-amr-<pt|en>.tex
+```
+
 Os dois documentos usam a fonte Arial via `fontspec`, o que exige **XeLaTeX**
-(não `pdflatex`) — a diretiva `% !TEX program = xelatex` está na primeira
-linha de cada `.tex` para editores que a reconhecem. Cada pasta (`src/pt/`,
-`src/en/`) é buildada independentemente com `latexmk`:
-
-```bash
-cd src/pt && latexmk -xelatex -interaction=nonstopmode -halt-on-error mixed-precision-amr-pt.tex
-cd src/en && latexmk -xelatex -interaction=nonstopmode -halt-on-error mixed-precision-amr-en.tex
-```
-
-Isso roda `xelatex → bibtex → xelatex → xelatex` automaticamente. Após
-compilar, checar o `.log` por citações/referências indefinidas:
-
-```bash
-grep -iE "undefined|LaTeX Warning: Citation|LaTeX Warning: Reference" *.log
-```
-
-Ao final, limpar os artefatos de build (mantendo o `.pdf`):
-
-```bash
-latexmk -c mixed-precision-amr-<pt|en>.tex
-rm -f mixed-precision-amr-<pt|en>.bbl mixed-precision-amr-<pt|en>.xdv
-```
+(não `pdflatex`). A diretiva `% !TEX program = xelatex` está na primeira
+linha de cada `.tex` para editores que a reconhecem. O `latexmk` cuida das
+múltiplas passadas (`xelatex → bibtex → xelatex → xelatex`).
 
 Os arquivos temporários (`.aux`, `.bbl`, `.blg`, `.fdb_latexmk`, `.fls`,
 `.log`, `.out`, `.synctex.gz`, `.xdv`) já estão listados no `.gitignore` de
