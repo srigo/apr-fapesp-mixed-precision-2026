@@ -1,0 +1,327 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{fontspec}
+\setmainfont{Arial}
+\usepackage[english]{babel}
+\usepackage{microtype}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage[hidelinks,breaklinks]{hyperref}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+\titleformat{\section}{\normalfont\large\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.5em}
+
+\newcommand{\gpuzip}{GPUZIP}
+
+\begin{document}
+
+\begin{center}
+{\Large\bfseries Accurate FP64 Seismic Simulation on Modern NVIDIA
+Architectures: Co-designing Mixed Precision, Compressed Checkpointing, and
+Prefetch for PDE-Based Reverse Time Migration}
+\end{center}
+
+\vspace{1em}
+
+\noindent\textbf{Principal Investigator:} Prof.\ Sandro Rigo\\
+\textbf{Title/Role:} Associate Professor, Institute of Computing\\
+\textbf{University:} Universidade Estadual de Campinas\\
+\textbf{Collaborator 1:} Thiago Maltempi\,---\,Graduate Researcher (PhD
+Candidate), Institute of Computing, Universidade Estadual de Campinas\\
+\textbf{Collaborator 2:} Prof.\ Hervé Yviquel\,---\,Assistant Professor,
+Institute of Computing, Universidade Estadual de Campinas
+
+% ============================================================================
+\section*{Abstract}
+
+Scientific simulations such as Reverse Time Migration (RTM) solve partial
+differential equations (PDEs) demanding FP64/FP32 accuracy, yet modern NVIDIA
+GPUs increasingly optimize for low-precision AI workloads (FP8/BF16) and expose
+new memory hierarchies, tensor cores, and dense linear-algebra libraries with
+mixed-precision extensions. Our prior work, \textbf{\gpuzip}, accelerated RTM on
+V100 systems by combining GPU-side lossy compression (NVIDIA Bitcomp via nvCOMP)
+with checkpoint prefetching, cutting host--GPU transfer volume by up to
+$80\times$ and delivering up to $5.1\times$ end-to-end speedup. This project
+extends \gpuzip{} to modern NVIDIA hardware over a 12-month programme in two
+stages. In the first six months, using H100 80\,GB cloud GPUs, we will:
+(1)~port Awave-3D and \gpuzip{} to the NVIDIA HPC SDK; and (2)~re-evaluate
+compressed checkpointing and prefetch on Hopper memory, introducing
+\textbf{differential checkpointing}\,---\,a hybrid scheme that intermixes full
+wavefield snapshots with compressed inter-timestep deltas to reduce both
+transfer volume and recomputation cost. In the second six months, using an RTX
+PRO 6000 Blackwell GPU, we will: (3)~introduce mixed-precision wavefield updates
+via cuBLAS mixed-precision GEMM and cuSOLVER iterative refinement; and (4)~map
+where Ozaki-scheme FP64 emulation via low-precision tensor cores,
+cuFFT-accelerated spectral operators, and the precision$\times$compression
+interaction improve a memory-bound stencil solver on AI-first hardware.
+Outcomes include an open-source \gpuzip{} v3.0 release and a peer-reviewed
+publication.
+
+\textbf{Keywords:} high-performance computing; reverse time migration; mixed
+precision; lossy compression; checkpointing
+
+% ============================================================================
+\section*{NVIDIA Platforms}
+
+\textbf{HPC SDK} (nvc++/nvfortran, CUDA-X math libraries, Nsight
+Systems/Compute). \emph{Experience:} team uses CUDA and Nsight Systems
+routinely. \emph{Adoption:} migrate Awave-3D build from clang to nvc++; validate
+numerical parity against existing baselines. Nsight Compute provides
+kernel-level roofline analysis to identify memory-bandwidth-bound vs.\
+compute-bound kernels and objectively scope tensor-core opportunities.
+
+\textbf{nvCOMP / Bitcomp} (GPU-side lossy compressor). \emph{Experience:}
+integrated and validated in \gpuzip{} v2.0; Bitcomp delivered the best
+accuracy-compression balance on V100. \emph{Adoption:} re-tune error bounds for
+full-checkpoint and delta-checkpoint paths; re-benchmark throughput against HBM3
+bandwidth on H100.
+
+\textbf{cuBLAS (mixed-precision extensions) and cuSOLVER (iterative-refinement
+solver).} Both ship inside the HPC SDK. \emph{Experience:} team has used BLAS
+and LAPACK routines in prior HPC work. \emph{Adoption:} apply cuBLAS
+mixed-precision GEMM (FP32 compute with FP64 accumulation) and cuSOLVER
+iterative refinement to dense sub-kernels in the RTM pipeline. Evaluate
+Ozaki-scheme FP64 emulation via low-precision tensor-core units on the RTX PRO
+6000 Blackwell\,---\,a GPU whose negligible native FP64 makes it the ideal
+platform to characterise whether tensor-core emulation can substitute for
+hardware FP64 in scientific workloads.
+
+\textbf{cuFFT.} \emph{Experience:} used in prior spectral operator work.
+\emph{Adoption:} benchmark cuFFT-based pseudo-spectral derivative operators as
+an alternative to FDM stencils for selected wavefield updates; characterise the
+memory-bandwidth vs.\ compute trade-off relative to the standard
+finite-difference path on H100 HBM3.
+
+\textbf{H100 80\,GB SXM5 (cloud) and RTX PRO 6000 Blackwell (hardware).} H100 is
+used for Phases 1--2 (FP64-heavy, multi-GPU HPC requiring HBM3 and NVLink). RTX
+PRO 6000 is used for Phases 3--4 (mixed-precision and Ozaki-scheme study, local
+development, and continuation beyond the cloud expiry window). The RTX PRO 6000
+Blackwell's 5th-generation tensor cores with FP8/FP4 support and 96\,GB GDDR7
+ECC memory make it a scientifically distinct platform for Ozaki-scheme
+emulation. Recent work has demonstrated up to $2.3\times$ speedup over native
+FP64 DGEMM on this specific GPU.
+
+% ============================================================================
+\section*{Dataset and Model}
+
+\begin{itemize}
+  \item \textbf{Size:} \emph{$\approx$X\,TB total (confirm from REDU).}
+        Checkpoint pools reached $\approx$330\,GB host RAM on V100; single
+        Marmousi3D checkpoint $\approx$500\,MB.
+  \item \textbf{Data type:} seismic velocity models and traces (numerical
+        grids).
+  \item \textbf{Source:} Salt (SEG/EAGE) and Marmousi3D are open; Large dataset
+        is in-house.
+  \item \textbf{Confidentiality:} non-confidential, no personal data, no NDA.
+  \item \textbf{AI model parameters:} not applicable (numerical PDE solver).
+  \item \textbf{Storage location:} Universidade Estadual de Campinas (UNICAMP),
+        Campinas, Brazil; staged for upload to cloud.
+\end{itemize}
+
+% ============================================================================
+\section*{Introduction}
+
+Hardware is trending toward low precision for AI, but PDE-based scientific
+simulation requires high precision to remain trustworthy. RTM, a seismic imaging
+method that solves the wave equation by finite differences over thousands of
+time steps, is a canonical example: geophysicists use the migrated image to
+guide expensive drilling decisions, so numerical fidelity is non-negotiable. RTM
+is also memory-intensive, requiring hundreds of gigabytes of wavefield state and
+relying on checkpointing to trade memory against recomputation in its
+forward/backward adjoint structure.
+
+Our prior work addressed the dominant bottleneck (host--GPU checkpoint transfer
+over PCIe) with \textbf{\gpuzip}~[1][2], which compresses checkpoints on the GPU
+(Bitcomp) and proactively prefetches them, reaching up to $5.1\times$ speedup on
+V100 while preserving image quality (SSIM $\approx 1$, near-zero relative
+error). Three shifts now motivate this project. First, \textbf{the memory
+bottleneck is changing}: Hopper-class coherent interconnects (HBM3, NVLink-C2C)
+shrink the PCIe wall, making it an open empirical question whether compressed
+checkpointing still pays and how the optimal cache size and prefetch schedule
+shift. Second, \textbf{checkpoint strategies can be extended}: rather than
+storing only full wavefield snapshots, a hybrid scheme can intermix full
+checkpoints with compressed inter-timestep deltas (small difference fields) that
+allow partial forward recomputation from the nearest full checkpoint without
+restarting from scratch, reducing both storage volume and recomputation cost.
+Third, \textbf{modern math libraries reshape the precision/performance trade
+space}: cuBLAS exposes mixed-precision GEMM with FP64-accumulation paths,
+cuSOLVER offers iterative-refinement solvers, and the Ozaki scheme enables
+FP64-accurate DGEMM via low-precision tensor cores, an approach recently shown
+to achieve up to $2.3\times$ speedup over native FP64 DGEMM on the RTX PRO 6000
+Blackwell~[3]. To our knowledge, this is the first systematic co-design of
+differential checkpointing, lossy compression, mixed-precision linear algebra,
+and prefetch for an adjoint PDE solver on modern NVIDIA hardware.
+
+% ============================================================================
+\section*{Methods}
+
+\textbf{Phase 1\,---\,HPC SDK port and validation (M1--M2, H100).} Build
+Awave-3D and \gpuzip{} with nvc++, re-integrate nvCOMP/Bitcomp, and reproduce
+V100 baselines on H100. Profile with Nsight Systems and Nsight Compute to
+establish roofline positions for all kernels, confirming that FDM stencils are
+memory-bandwidth-bound before any changes are attempted.
+
+\textbf{Phase 2\,---\,Differential checkpointing and compression on Hopper
+(M2--M5, H100).} Re-characterise the \gpuzip{} checkpoint pipeline on Hopper
+(HBM3 bandwidth, larger L2, NVLink) and introduce \emph{differential
+checkpointing}: a hybrid strategy that stores full compressed snapshots at
+coarse intervals and compressed inter-timestep delta fields at finer
+granularity. During the backward pass, deltas are accumulated from the nearest
+full checkpoint, avoiding full forward recomputation for intermediate
+timesteps. We characterise the accuracy impact of applying lossy compression
+independently to both full checkpoints and deltas (PSNR, SSIM, mean relative
+error), sweep GPU Checkpoint Cache size and prefetch schedule, and determine the
+optimal full-to-delta checkpoint ratio across all three datasets and
+checkpointing algorithms (Revolve, zCut, Uniform).
+
+\textbf{Phase 3\,---\,Mixed-precision wavefield updates (M7--M10, RTX PRO
+6000).} Introduce reduced-precision compute paths in the finite-difference
+stencil (FP32 update with FP64 accumulation). For dense sub-kernels identified
+in Phase 1, apply cuBLAS mixed-precision GEMM and cuSOLVER iterative
+refinement; evaluate Ozaki-scheme FP64 emulation via low-precision tensor-core
+units as an alternative. The RTX PRO 6000 Blackwell\,---\,with negligible native
+FP64 but abundant FP8/FP4 tensor-core throughput\,---\,is the ideal platform for
+this study: it forces the question of whether Ozaki-scheme emulation can fully
+substitute for hardware FP64. Bound all errors jointly (compression $\times$
+precision interaction) against the FP64 baseline using PSNR, SSIM, and mean
+relative error.
+
+\textbf{Phase 4\,---\,Spectral operators and final evaluation (M10--M12, RTX PRO
+6000).} Benchmark cuFFT-based pseudo-spectral derivative operators as an
+alternative to FDM stencils for selected wavefield updates. Integrate findings
+from Phases 2--3 into a unified \gpuzip{} v3.0 release, covering differential
+checkpointing, mixed-precision paths, and Ozaki-scheme emulation. Multi-node
+scaling evaluation ($\leq$8 GPUs). The deliverable is a precise map of which
+NVIDIA library and algorithm paths improve a memory-bound adjoint PDE solver and
+which do not.
+
+\textbf{Evaluation.} All experiments span three datasets (Large, Marmousi3D,
+Salt) and three checkpointing algorithms (Revolve, zCut, Uniform). Kernel-level
+profiling: Nsight Compute (roofline, memory-traffic breakdowns); timeline
+profiling: Nsight Systems. Implementation: C/C++ with CUDA under the HPC SDK;
+OpenMP Cluster for multi-node scaling.
+
+% ============================================================================
+\section*{Expected Results}
+
+Timeline (12 months: M1--M6 on H100 cloud, M7--M12 on RTX PRO 6000):
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}l X l c@{}}
+\toprule
+\textbf{Month} & \textbf{Activity} & \textbf{Hardware} & \textbf{Phase} \\
+\midrule
+\textbf{M1--M2} & Port Awave-3D + \gpuzip{} to HPC SDK (nvc++); reproduce
+  V100 baselines; Nsight Compute roofline profiling. & H100 (ramp-up) & 1 \\
+\addlinespace
+\textbf{M2--M5} & Differential checkpointing + lossy compression on Hopper;
+  prefetch schedule optimisation; accuracy study (PSNR/SSIM/MRE). & H100
+  (peak) & 2 \\
+\addlinespace
+\textbf{M5--M6} & Multi-node scaling ($\leq$8 GPUs); open-source \gpuzip{}
+  v3.0-alpha release; reproducibility package (REDU). & H100 (8 GPUs) & 2 \\
+\addlinespace
+\textbf{M7--M10} & Mixed-precision stencil updates (cuBLAS/cuSOLVER/Ozaki);
+  FP64 emulation on RTX PRO 6000; precision$\times$compression interaction. &
+  RTX PRO 6000 & 3 \\
+\addlinespace
+\textbf{M10--M12} & cuFFT spectral-operator benchmark; unified \gpuzip{}
+  v3.0 release; analysis, write-up, and paper submission. & RTX PRO 6000 &
+  4 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Projected outcomes:} open-source \gpuzip{} v3.0 targeting Hopper and
+Blackwell NVIDIA architectures (MIT license, GitHub); peer-reviewed publication
+(target: SBAC-PAD / Euro-Par / IJHPCA); public reproducibility package
+(datasets, Nsight profiles, quality metrics) via UNICAMP REDU.
+
+\textbf{Dependencies:} the project is not conditional on this award being
+combined with another grant. Existing institutional support funds personnel and
+local infrastructure; none duplicates the requested NVIDIA cloud compute or
+hardware.
+
+% ============================================================================
+\section*{Project Support Details}
+
+We request both cloud H100 80\,GB hours (Phases 1--2) and one RTX PRO 6000
+Blackwell GPU (Phases 3--4). The H100 is required for FP64-heavy multi-GPU
+experiments demanding Hopper's HBM3 bandwidth, FP64 Tensor Core throughput, and
+NVLink fabric. The RTX PRO 6000 is requested for the mixed-precision and
+Ozaki-scheme study in the second six months: its abundant FP8/FP4 tensor-core
+throughput and 96\,GB GDDR7 ECC memory make it a scientifically distinct target
+for FP64 emulation research, and it provides local compute beyond the cloud
+expiry window.
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}X l l@{}}
+\toprule
+\textbf{Resource} & \textbf{Request} & \textbf{Cap} \\
+\midrule
+Cloud GPU hours (H100 80\,GB) & \textbf{$\sim$17,000 (Phases 1--2)} & 30,000 \\
+Concurrent GPUs & \textbf{up to 8} & 8 \\
+Cloud storage & \textbf{$\sim$4\,TB} & 32\,TB \\
+Physical hardware & \textbf{1$\times$ RTX PRO 6000 Blackwell (Phases 3--4)} &
+  $\leq$8 GPUs \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{GPU-hour breakdown} (placeholders\,---\,replace with measured pilot
+timings before submission):
+
+\begin{itemize}
+  \item \textbf{Phase 1 port + roofline profiling:} $\sim$2,000 GPU-hrs (H100)
+  \item \textbf{Phase 2 differential checkpointing + compression study:}
+        $\sim$13,000 GPU-hrs (H100, bulk)
+  \item \textbf{Profiling overhead (Nsight Compute sweeps):} $\sim$2,000
+        GPU-hrs (H100)
+\end{itemize}
+
+\textbf{Total $\approx$ 17,000 H100 hours}, well under the 30,000-hour cap.
+Phases 3--4 run on the RTX PRO 6000 (local).
+
+% ============================================================================
+\section*{Cloud Readiness}
+
+Development environment is Linux (Ubuntu); Awave-3D and \gpuzip{} already build
+and run on Ubuntu, matching the cloud servers.
+
+\begin{itemize}
+  \item \textbf{Importing data:} pull datasets from UNICAMP REDU on day one.
+        (Experienced.)
+  \item \textbf{Installing dependencies:} HPC SDK (nvc++), nvCOMP, cuBLAS,
+        cuSOLVER, cuFFT\,---\,all via NVIDIA NGC containers. (Experienced.)
+  \item \textbf{Building/running the codebase:} existing CMake build scripts and
+        CLI workflow. (Experienced.)
+  \item \textbf{Backing up results:} Nsight profiles and checkpoint outputs
+        synced off ephemeral instances regularly. (Experienced.)
+  \item \textbf{CUDA and NVIDIA SDKs:} HPC SDK + CUDA-X + nvCOMP integration is
+        core to the project. (Experienced.)
+  \item \textbf{Containers:} containerised builds from NVIDIA NGC base images
+        for full reproducibility. (Experienced.)
+\end{itemize}
+
+% ============================================================================
+\section*{Appendix B\,---\,CV(s) (required, 1 page per collaborator)}
+
+% TODO: add one-page CV per collaborator.
+
+\section*{Appendix C\,---\,Citations}
+
+% TODO: add the full references for citations [1]--[3].
+
+\end{document}
