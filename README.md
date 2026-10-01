@@ -11,7 +11,7 @@ Each folder in this root directory corresponds to a specific proposal submission
 ```text
 precision-amr/
 ├── apr-fapesp-precision-amr-2026/   # FAPESP proposal (2026)
-│   ├── doc/                         # Reference material and proposal drafts
+│   ├── assets/                      # Reference material and proposal drafts
 │   └── src/                         # LaTeX sources
 │       ├── en/                      # English version
 │       └── pt/                      # Portuguese version

@@ -6,7 +6,7 @@ Instruções de projeto para o Claude Code neste repositório.
 
 Proposta de projeto de pesquisa "Precision-AMR" (mixed-precision + AMR para
 RTM/FWI baseada em EDPs). O texto-fonte original está em
-[doc/Precision-AMR_Proposal.docx](doc/Precision-AMR_Proposal.docx). A partir
+[assets/Precision-AMR_Proposal.docx](assets/Precision-AMR_Proposal.docx). A partir
 dele foram criadas duas versões em LaTeX, mantidas em paralelo:
 
 - [src/pt/mixed-precision-amr-pt.tex](src/pt/mixed-precision-amr-pt.tex) —
@@ -132,7 +132,7 @@ em nenhuma seção do roteiro.
   aprovado exige consentimento prévio da FAPESP; obrigatoriedade de
   consultar a FAPESP antes de aceitar financiamento complementar.
 
-A pasta `doc/` guarda o texto original em docx solicitado ao usuário; o
+A pasta `assets/` guarda o texto original em docx solicitado ao usuário; o
 plano de gestão de dados, a súmula curricular, as folhas de rosto e as
 planilhas SAGe são artefatos separados do texto do projeto propriamente
 dito — não fazem parte dos arquivos em `src/pt/` e `src/en/` a menos que o
